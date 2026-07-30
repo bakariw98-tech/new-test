@@ -6,6 +6,8 @@ connect to over HTTP, built as a Next.js route handler and deployed on Vercel.
 It exists to answer one question quickly: *is the connection working?* Three tools, one resource,
 and one prompt — enough to exercise every MCP primitive without any other moving parts.
 
+**Live endpoint:** `https://hello-world-mcp.vercel.app/api/mcp`
+
 ## What it exposes
 
 | Primitive | Name | Description |
@@ -33,12 +35,10 @@ what makes it a good fit for serverless.
 
 ## Connecting an agent
 
-Replace `<your-deployment>` with your deployment host.
-
 **Claude Code**
 
 ```bash
-claude mcp add --transport http hello-world https://<your-deployment>/api/mcp
+claude mcp add --transport http hello-world https://hello-world-mcp.vercel.app/api/mcp
 ```
 
 **Cursor / Windsurf / Claude Desktop** (`mcpServers` config)
@@ -47,7 +47,7 @@ claude mcp add --transport http hello-world https://<your-deployment>/api/mcp
 {
   "mcpServers": {
     "hello-world": {
-      "url": "https://<your-deployment>/api/mcp"
+      "url": "https://hello-world-mcp.vercel.app/api/mcp"
     }
   }
 }
@@ -60,7 +60,7 @@ claude mcp add --transport http hello-world https://<your-deployment>/api/mcp
   "mcpServers": {
     "hello-world": {
       "command": "npx",
-      "args": ["-y", "mcp-remote", "https://<your-deployment>/api/mcp"]
+      "args": ["-y", "mcp-remote", "https://hello-world-mcp.vercel.app/api/mcp"]
     }
   }
 }
@@ -101,10 +101,15 @@ npx @modelcontextprotocol/inspector
 Deploys to Vercel with no configuration — the route handler is detected as a Vercel Function.
 `maxDuration` is set to 60s in `app/api/mcp/route.ts`.
 
-If the deployment has **Deployment Protection** enabled (the default for preview deployments on
-some plans), MCP clients will get a `401` because they cannot pass through Vercel's auth wall.
-Either use a production deployment, disable protection for the project, or add a
-protection-bypass token.
+**Deployment Protection must be off.** If it is enabled, MCP clients get a `401` — they cannot
+pass through Vercel's auth wall. Note that Vercel Authentication can be scoped to
+`all_except_custom_domains`, which covers production too, so deploying to production is not on its
+own enough. Either disable it for the project, or add a protection-bypass token that your client
+can send as a header.
+
+This project was deployed via direct file upload, so it is **not linked to this Git repository** —
+pushing to the repo does not redeploy it. Connect the repo in the Vercel dashboard if you want
+automatic deploys on push.
 
 ## Adding your own tool
 
