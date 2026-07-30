@@ -1,4 +1,5 @@
 import { renderToPng, SIZES, type SizeName } from "./render";
+import { checkImageSources, explainRenderError, lintMarkup } from "./lint";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -38,6 +39,12 @@ export async function POST(request: Request) {
     );
   }
 
+  const { errors, warnings } = lintMarkup(markup);
+  if (errors.length === 0) errors.push(...(await checkImageSources(markup)));
+  if (errors.length > 0) {
+    return Response.json({ error: "Invalid markup.", problems: errors }, { status: 400 });
+  }
+
   try {
     const png = await renderToPng({
       markup,
@@ -51,11 +58,14 @@ export async function POST(request: Request) {
         "Content-Type": "image/png",
         "Content-Length": String(png.byteLength),
         "Cache-Control": "no-store",
+        // Warning text is non-ASCII, and header values must be latin-1, so the
+        // count goes in the header and the text is reported via MCP instead.
+        ...(warnings.length > 0 ? { "X-Render-Warning-Count": String(warnings.length) } : {}),
       },
     });
   } catch (error) {
     return Response.json(
-      { error: error instanceof Error ? error.message : "Render failed." },
+      { error: explainRenderError(error instanceof Error ? error.message : "Render failed.") },
       { status: 422 },
     );
   }
