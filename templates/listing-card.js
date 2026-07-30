@@ -15,9 +15,14 @@ const ORIGIN = process.env.RENDER_ORIGIN || "https://hello-world-mcp.vercel.app"
 const BAND_HEIGHT = 820;
 const PANEL_HEIGHT = 530;
 
+// /api/image responses are cached immutably, which is right for a URL whose
+// output is fully determined by its parameters — but a change to the conversion
+// code changes the output for the same URL. Bump this to invalidate.
+const NORMALISER_VERSION = 2;
+
 /** Wraps any image URL so it arrives as JPEG at the right size. */
 function normalised(src, width = 1080, height = BAND_HEIGHT) {
-  return `${ORIGIN}/api/image?src=${encodeURIComponent(src)}&w=${width}&h=${height}&fit=cover`;
+  return `${ORIGIN}/api/image?src=${encodeURIComponent(src)}&w=${width}&h=${height}&fit=cover&v=${NORMALISER_VERSION}`;
 }
 
 function listingCard({
