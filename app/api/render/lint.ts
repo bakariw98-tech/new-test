@@ -3,6 +3,8 @@
  * generic Satori stack trace. Errors block the render; warnings do not.
  */
 
+import { FONT_FAMILIES } from "./render";
+
 export type LintResult = { errors: string[]; warnings: string[] };
 
 export function lintMarkup(markup: string): LintResult {
@@ -74,14 +76,15 @@ export function lintMarkup(markup: string): LintResult {
     }
   }
 
+  const known = new Set(FONT_FAMILIES.map((f) => f.toLowerCase()));
   const fonts = new Set<string>();
   for (const match of markup.matchAll(/font-family\s*:\s*([^;"']+)/gi)) {
     const family = match[1].trim().replace(/['"]/g, "").split(",")[0].trim();
-    if (family && family.toLowerCase() !== "inter") fonts.add(family);
+    if (family && !known.has(family.toLowerCase())) fonts.add(family);
   }
   if (fonts.size > 0) {
     warnings.push(
-      `font-family ${[...fonts].map((f) => `"${f}"`).join(", ")} is not available and will silently fall back to Inter. Only Inter 400 and 700 are loaded.`,
+      `font-family ${[...fonts].map((f) => `"${f}"`).join(", ")} is not loaded and will silently fall back. Available: ${FONT_FAMILIES.join(", ")}.`,
     );
   }
 

@@ -61,9 +61,18 @@ the full width unless told otherwise. A pill button or badge written without
 \`textAlign\`, \`textTransform\`, \`textDecoration\`, \`textShadow\`,
 \`textOverflow: ellipsis\`, \`whiteSpace\`, \`color\`.
 
-**Fonts: Inter at weight 400 and 700 only.** Any other \`fontFamily\` silently
-falls back to Inter, so do not design around a font you cannot have. Use 700 for
-headlines, 400 for body. There is no italic.
+**Available fonts.** Anything else silently falls back, so do not design around a
+font that is not on this list. There is no italic.
+
+| Family | Weights | Feel |
+| --- | --- | --- |
+| \`Inter\` | 400, 700 | Neutral UI sans. Safe default. |
+| \`Poppins\` | 400, 700 | Geometric sans, rounder and friendlier. |
+| \`Playfair Display\` | 400, 700 | High-contrast serif. Reads upmarket. |
+| \`DM Serif Display\` | 400 | Display serif for headlines only — no bold, so do not set font-weight 700 on it. |
+
+A common pairing is a serif headline over a sans body: \`Playfair Display\` 700 for
+the big line, \`Inter\` 400 underneath.
 
 Units: \`px\` is the reliable choice. \`rem\` resolves against a 16px root
 (\`3rem\` = 48px). Percentages work for layout dimensions.
@@ -287,7 +296,7 @@ export const RULES_SUMMARY = [
   "4. No <br> — it throws. Use separate flex children, or white-space: pre-wrap with a newline.",
   "5. Images need an absolute https:// URL or a data: URI, plus explicit width and height.",
   "",
-  "Fonts: Inter 400 and 700 only. Any other font-family silently falls back to Inter.",
+  "Fonts: Inter, Poppins, Playfair Display (400/700) and DM Serif Display (400 only). Any other font-family silently falls back.",
   "Read the `render://guide` and `render://examples` resources for the full CSS surface",
   "and copy-pasteable slide layouts.",
 ].join("\n");

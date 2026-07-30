@@ -13,6 +13,38 @@ export const SIZES = {
 
 export type SizeName = keyof typeof SIZES;
 
+/**
+ * Font families available to markup. Satori only knows what is loaded here, and
+ * an unknown `font-family` falls back silently rather than erroring — so adding a
+ * family means adding it to this list, not just naming it in the CSS.
+ */
+export const FONTS: Array<{ family: string; package: string; file: string; weight: 400 | 700 }> = [
+  { family: "Inter", package: "inter", file: "inter-latin-400-normal.woff", weight: 400 },
+  { family: "Inter", package: "inter", file: "inter-latin-700-normal.woff", weight: 700 },
+  { family: "Poppins", package: "poppins", file: "poppins-latin-400-normal.woff", weight: 400 },
+  { family: "Poppins", package: "poppins", file: "poppins-latin-700-normal.woff", weight: 700 },
+  {
+    family: "Playfair Display",
+    package: "playfair-display",
+    file: "playfair-display-latin-400-normal.woff",
+    weight: 400,
+  },
+  {
+    family: "Playfair Display",
+    package: "playfair-display",
+    file: "playfair-display-latin-700-normal.woff",
+    weight: 700,
+  },
+  {
+    family: "DM Serif Display",
+    package: "dm-serif-display",
+    file: "dm-serif-display-latin-400-normal.woff",
+    weight: 400,
+  },
+];
+
+export const FONT_FAMILIES = [...new Set(FONTS.map((f) => f.family))];
+
 let fontCache: Array<{ name: string; data: Buffer; weight: 400 | 700; style: "normal" }> | null = null;
 
 // Fonts come from the @fontsource/inter package rather than committed binaries.
@@ -20,20 +52,19 @@ let fontCache: Array<{ name: string; data: Buffer; weight: 400 | 700; style: "no
 // Satori accepts ttf, otf, and woff — but not woff2, so use the .woff files.
 // next.config.ts lists these under outputFileTracingIncludes, otherwise Next
 // cannot trace a runtime path.join and they are missing from the deployed bundle.
-const FONT_DIR = path.join(process.cwd(), "node_modules", "@fontsource", "inter", "files");
+const FONTSOURCE_DIR = path.join(process.cwd(), "node_modules", "@fontsource");
 
 async function loadFonts() {
   if (fontCache) return fontCache;
 
-  const [regular, bold] = await Promise.all([
-    readFile(path.join(FONT_DIR, "inter-latin-400-normal.woff")),
-    readFile(path.join(FONT_DIR, "inter-latin-700-normal.woff")),
-  ]);
-
-  fontCache = [
-    { name: "Inter", data: regular, weight: 400, style: "normal" },
-    { name: "Inter", data: bold, weight: 700, style: "normal" },
-  ];
+  fontCache = await Promise.all(
+    FONTS.map(async (font) => ({
+      name: font.family,
+      data: await readFile(path.join(FONTSOURCE_DIR, font.package, "files", font.file)),
+      weight: font.weight,
+      style: "normal" as const,
+    })),
+  );
   return fontCache;
 }
 
