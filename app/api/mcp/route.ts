@@ -3,6 +3,7 @@ import { z } from "zod";
 import { renderToPng, SIZES } from "../render/render";
 import { EXAMPLES, GUIDE, RULES_SUMMARY } from "../render/docs";
 import { checkImageSources, explainRenderError, lintMarkup } from "../render/lint";
+import { blobConfigured, selfDescribingUrl, uploadToBlob } from "../render/store";
 
 const handler = createMcpHandler(
   (server) => {
@@ -77,6 +78,12 @@ const handler = createMcpHandler(
           "Sizes: ig-portrait 1080x1350 (best default, most feed space), ig-square 1080x1080,",
           "ig-story 1080x1920, og 1200x630. All slides in one carousel must share a size.",
           "",
+          "By default this returns a fetchable image URL, not the image bytes. Pass that URL to",
+          "whatever comes next — an upload tool, a message, a download. Do not ask for the bytes",
+          "in order to hand them somewhere else; a single 1080x1350 PNG is megabytes, which is",
+          "millions of characters as base64. Use output:'inline' only when a person needs to look",
+          "at the result in the conversation.",
+          "",
           "If a render fails, the error comes back with the specific fix and the full authoring",
           "guide, so correct the markup and call again rather than giving up.",
         ].join("\n"),
@@ -98,9 +105,15 @@ const handler = createMcpHandler(
             ),
           width: z.number().int().min(16).max(4096).optional().describe("Overrides the size preset."),
           height: z.number().int().min(16).max(4096).optional().describe("Overrides the size preset."),
+          output: z
+            .enum(["url", "inline", "both"])
+            .default("url")
+            .describe(
+              "How to return the render. 'url' (default) returns a fetchable image URL and keeps the bytes server-side — use this for anything programmatic, and pass the URL to other tools rather than the image itself. 'inline' returns the PNG as base64 image content so a human can see it in the conversation; it costs enormous context, so only use it when someone actually needs to look at the result. 'both' does each.",
+            ),
         }),
       },
-      async ({ markup, size, width, height }) => {
+      async ({ markup, size, width, height, output }) => {
         const { errors, warnings } = lintMarkup(markup);
         if (errors.length === 0) errors.push(...(await checkImageSources(markup)));
 
@@ -128,19 +141,41 @@ const handler = createMcpHandler(
 
           const notes = [
             `Rendered ${dimensions.width}x${dimensions.height} PNG, ${(png.byteLength / 1024).toFixed(1)} KB.`,
-            ...warnings.map((w) => `Warning: ${w}`),
           ];
 
-          return {
-            content: [
-              {
-                type: "image",
-                data: Buffer.from(png).toString("base64"),
-                mimeType: "image/png",
-              },
-              { type: "text", text: notes.join("\n") },
-            ],
-          };
+          // Default path: hand back a reference, not the bytes.
+          if (output !== "inline") {
+            if (blobConfigured()) {
+              const url = await uploadToBlob(png);
+              notes.push(`URL: ${url}`, "Stored in Vercel Blob. Permanent, CDN-backed, safe to pass to other tools.");
+            } else {
+              const { url, tooLong } = selfDescribingUrl({ markup, size, width, height });
+              notes.push(`URL: ${url}`);
+              notes.push(
+                tooLong
+                  ? "This URL encodes the markup and is long enough that some clients may reject it. Set BLOB_READ_WRITE_TOKEN on the deployment to get short permanent URLs instead."
+                  : "This URL re-renders the image on fetch, so it needs no storage. Set BLOB_READ_WRITE_TOKEN on the deployment for short permanent blob URLs instead.",
+              );
+            }
+          }
+
+          notes.push(...warnings.map((w) => `Warning: ${w}`));
+
+          const content: Array<
+            | { type: "text"; text: string }
+            | { type: "image"; data: string; mimeType: string }
+          > = [];
+
+          if (output !== "url") {
+            content.push({
+              type: "image",
+              data: Buffer.from(png).toString("base64"),
+              mimeType: "image/png",
+            });
+          }
+          content.push({ type: "text", text: notes.join("\n") });
+
+          return { content };
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
           return {

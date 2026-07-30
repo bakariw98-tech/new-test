@@ -115,6 +115,33 @@ Or pass explicit \`width\` and \`height\` up to 4096.
   usually want 72-120px.
 - Padding of 80-100px reads as deliberate. Less looks cramped at this size.
 
+## What you get back
+
+By default \`render_image\` returns a **URL**, not the image bytes.
+
+That is deliberate. A 1080x1350 PNG is a couple of megabytes, which is millions of
+characters once base64-encoded — one slide would consume an entire context window,
+and a ten-slide carousel is simply impossible. So the bytes stay server-side and
+you get a reference.
+
+Practical consequences:
+
+- To hand a render to another tool — a Drive upload, a message, a download — pass
+  **the URL**. Do not fetch the bytes in order to relay them.
+- Use \`output: "inline"\` only when a person needs to *look* at the image in the
+  conversation. It is expensive, so it is never the right choice for a pipeline.
+- \`output: "both"\` exists for the case where someone wants to see it and you also
+  need the URL for a later step.
+
+The URL comes from one of two backends, transparently:
+
+- **Vercel Blob**, if \`BLOB_READ_WRITE_TOKEN\` is set on the deployment. Short,
+  permanent, CDN-backed, content-addressed so identical renders dedupe.
+- Otherwise a **self-describing URL** that carries the compressed markup in its
+  query string and re-renders on fetch. No storage to provision, and the result is
+  immutably cacheable, but the URL is long — a few hundred to a couple of thousand
+  characters. Still three orders of magnitude smaller than the PNG.
+
 ## Scale
 
 At 1080x1350 a typical slide is 100-200 KB of PNG and renders in well under a

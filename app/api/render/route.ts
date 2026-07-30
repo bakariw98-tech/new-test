@@ -1,8 +1,68 @@
 import { renderToPng, SIZES, type SizeName } from "./render";
 import { checkImageSources, explainRenderError, lintMarkup } from "./lint";
+import { decodeMarkup } from "./store";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
+
+/**
+ * GET /api/render?m=<compressed markup>&size=...
+ *
+ * Resolves the self-describing URLs handed out by render_image. The query string
+ * fully determines the bytes, so the response is immutably cacheable and the CDN
+ * serves repeats for free.
+ */
+export async function GET(request: Request) {
+  const params = new URL(request.url).searchParams;
+  const encoded = params.get("m");
+
+  if (!encoded) {
+    return Response.json(
+      { error: "Missing `m` parameter. GET /api/render expects a compressed markup payload, which render_image produces — POST JSON here instead if you have raw markup." },
+      { status: 400 },
+    );
+  }
+
+  let markup: string;
+  try {
+    markup = decodeMarkup(encoded);
+  } catch {
+    return Response.json({ error: "`m` is not a valid compressed markup payload." }, { status: 400 });
+  }
+
+  const size = params.get("size");
+  const width = Number(params.get("width")) || undefined;
+  const height = Number(params.get("height")) || undefined;
+
+  if (size !== null && !(size in SIZES)) {
+    return Response.json(
+      { error: `\`size\` must be one of: ${Object.keys(SIZES).join(", ")}.` },
+      { status: 400 },
+    );
+  }
+
+  try {
+    const png = await renderToPng({
+      markup,
+      size: (size as SizeName | null) ?? undefined,
+      width,
+      height,
+    });
+
+    return new Response(png as unknown as BodyInit, {
+      headers: {
+        "Content-Type": "image/png",
+        "Content-Length": String(png.byteLength),
+        "Cache-Control": "public, max-age=31536000, immutable",
+      },
+    });
+  } catch (error) {
+    return Response.json(
+      { error: explainRenderError(error instanceof Error ? error.message : "Render failed.") },
+      { status: 422 },
+    );
+  }
+}
 
 /**
  * POST /api/render
