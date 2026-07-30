@@ -25,7 +25,53 @@ function normalised(src, width = 1080, height = BAND_HEIGHT) {
   return `${ORIGIN}/api/image?src=${encodeURIComponent(src)}&w=${width}&h=${height}&fit=cover&v=${NORMALISER_VERSION}`;
 }
 
+/**
+ * Presets are the actual product: a named look is a value you can reuse across a
+ * whole listing, reproduce next quarter, and hand to a client as "their" style.
+ * Everything below is data — layout never changes between them.
+ */
+const PRESETS = {
+  // Cool navy with amber. Reads as a solid, mid-market listing.
+  midnight: {
+    accentColor: "#F5B841",
+    bgColor: "#101828",
+    textColor: "#FFFFFF",
+    mutedColor: "#9BA3C0",
+    dividerColor: "#3a4360",
+    bandColor: "#2b3450",
+    headingFont: "Inter",
+    bodyFont: "Inter",
+    headingWeight: 700,
+  },
+  // Warm bone and charcoal with soft gold, serif headings. For high-end listings
+  // where the number on the card is doing the talking.
+  estate: {
+    accentColor: "#B08D57",
+    bgColor: "#12100E",
+    textColor: "#F7F3EC",
+    mutedColor: "#A9A096",
+    dividerColor: "#3A342C",
+    bandColor: "#2A241E",
+    headingFont: "Playfair Display",
+    bodyFont: "Inter",
+    headingWeight: 700,
+  },
+  // Light, airy, architectural. Good for modern new-builds.
+  gallery: {
+    accentColor: "#1A1A1A",
+    bgColor: "#F4F1EC",
+    textColor: "#1A1A1A",
+    mutedColor: "#6B665F",
+    dividerColor: "#D8D2C8",
+    bandColor: "#E2DCD2",
+    headingFont: "DM Serif Display",
+    bodyFont: "Inter",
+    headingWeight: 400,
+  },
+};
+
 function listingCard({
+  preset = "midnight",             // named look; individual colours below still win
   photo = "",                      // property photo URL; falls back to bandColor when absent
   badge = "JUST LISTED",
   price = "$000,000",
@@ -37,13 +83,13 @@ function listingCard({
   brokerage = "Your Brokerage",
   cta = "Swipe for tour →",
   scrim = true,                    // darkens the photo bottom so the badge/price stay legible
-  bandColor = "#2b3450",
-  accentColor = "#F5B841",
-  bgColor = "#101828",
-  textColor = "#FFFFFF",
-  mutedColor = "#9BA3C0",
-  dividerColor = "#3a4360",
+  ...overrides
 } = {}) {
+  const theme = { ...(PRESETS[preset] ?? PRESETS.midnight), ...overrides };
+  const {
+    bandColor, accentColor, bgColor, textColor, mutedColor, dividerColor,
+    headingFont, bodyFont, headingWeight,
+  } = theme;
   const band = photo
     ? `<img src="${normalised(photo)}" style="position:absolute;left:0;top:0;width:1080px;height:${BAND_HEIGHT}px;object-fit:cover" />`
     : `<div style="display:flex;position:absolute;left:0;top:0;width:100%;height:${BAND_HEIGHT}px;background-color:${bandColor}"></div>`;
@@ -60,18 +106,18 @@ function listingCard({
       <div style="display:flex;color:${mutedColor};font-size:28px">${label}</div>
     </div>`;
 
-  return `<div style="display:flex;flex-direction:column;width:100%;height:100%;background-color:${bgColor};position:relative;font-family:Inter">
+  return `<div style="display:flex;flex-direction:column;width:100%;height:100%;background-color:${bgColor};position:relative;font-family:${bodyFont}">
   ${band}
   ${overlay}
   <div style="display:flex;position:absolute;left:56px;top:56px;background-color:${accentColor};border-radius:12px;padding:16px 28px">
     <div style="display:flex;color:${bgColor};font-size:34px;font-weight:700">${badge}</div>
   </div>
   <div style="display:flex;position:absolute;right:56px;top:56px;background-color:${bgColor};border-radius:12px;padding:16px 28px">
-    <div style="display:flex;color:${accentColor};font-size:34px;font-weight:700">${price}</div>
+    <div style="display:flex;color:${accentColor};font-size:34px;font-weight:${headingWeight};font-family:${headingFont}">${price}</div>
   </div>
   <div style="display:flex;flex-direction:column;position:absolute;left:0;top:${BAND_HEIGHT}px;width:100%;height:${PANEL_HEIGHT}px;background-color:${bgColor};padding:56px 64px;justify-content:space-between">
     <div style="display:flex;flex-direction:column">
-      <div style="display:flex;color:${textColor};font-size:56px;font-weight:700">${street}</div>
+      <div style="display:flex;color:${textColor};font-size:56px;font-weight:${headingWeight};font-family:${headingFont}">${street}</div>
       <div style="display:flex;color:${mutedColor};font-size:36px;font-weight:400;margin-top:12px">${cityState}</div>
     </div>
     <div style="display:flex;width:100%;height:2px;background-color:${dividerColor}"></div>
@@ -90,14 +136,15 @@ function listingCard({
 
 /** A photo-only slide for the middle of a tour: image, caption, slide counter. */
 function tourSlide({
+  preset = "midnight",
   photo,
   caption = "",
   index = 1,
   total = 1,
-  accentColor = "#F5B841",
-  bgColor = "#101828",
-  textColor = "#FFFFFF",
+  ...overrides
 } = {}) {
+  const theme = { ...(PRESETS[preset] ?? PRESETS.midnight), ...overrides };
+  const { accentColor, bgColor, textColor, headingFont, headingWeight } = theme;
   return `<div style="display:flex;position:relative;width:100%;height:100%;background-color:${bgColor};font-family:Inter">
   <img src="${normalised(photo, 1080, 1350)}" style="position:absolute;left:0;top:0;width:1080px;height:1350px;object-fit:cover" />
   <div style="display:flex;position:absolute;left:0;top:0;width:1080px;height:1350px;background:linear-gradient(180deg,rgba(16,24,40,0.45) 0%,rgba(16,24,40,0) 30%,rgba(16,24,40,0.85) 100%)"></div>
@@ -105,9 +152,9 @@ function tourSlide({
     <div style="display:flex;color:${accentColor};font-size:30px;font-weight:700">${index} / ${total}</div>
   </div>
   <div style="display:flex;flex-direction:column;position:absolute;left:0;bottom:0;width:1080px;padding:0 64px 190px 64px">
-    <div style="display:flex;color:${textColor};font-size:60px;font-weight:700;line-height:1.15">${caption}</div>
+    <div style="display:flex;color:${textColor};font-size:60px;font-weight:${headingWeight};font-family:${headingFont};line-height:1.15">${caption}</div>
   </div>
 </div>`;
 }
 
-module.exports = { listingCard, tourSlide, normalised };
+module.exports = { listingCard, tourSlide, normalised, PRESETS };
