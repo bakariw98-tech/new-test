@@ -43,6 +43,18 @@ Supported: \`display: flex\`, \`flexDirection\`, \`justifyContent\`, \`alignItem
 
 Not supported: grid, float, \`position: fixed\`, \`position: sticky\`.
 
+**Children stretch by default.** In a \`flex-direction: column\`, every child fills
+the full width unless told otherwise. A pill button or badge written without
+\`align-self: flex-start\` will span the entire slide and look wrong:
+
+\`\`\`html
+<!-- stretches edge to edge -->
+<div style="display:flex;background:#22d3ee;border-radius:9999px;padding:20px 36px">CTA</div>
+
+<!-- hugs its content, which is almost always what you want -->
+<div style="display:flex;align-self:flex-start;background:#22d3ee;border-radius:9999px;padding:20px 36px">CTA</div>
+\`\`\`
+
 ## Text
 
 \`fontFamily\`, \`fontSize\`, \`fontWeight\`, \`lineHeight\`, \`letterSpacing\`,
