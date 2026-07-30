@@ -43,7 +43,8 @@ export const DRIVE_SETUP_HINT = [
   "Google Drive delivery is not configured on this deployment. Set either:",
   "  - GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET and GOOGLE_REFRESH_TOKEN (user OAuth — required for personal Gmail accounts), or",
   "  - GOOGLE_SERVICE_ACCOUNT_KEY (the service-account JSON key — only works with a Shared Drive).",
-  "Optionally set GOOGLE_DRIVE_FOLDER_ID to give uploads a default destination folder.",
+  "No folder configuration is required: pass driveFolder to have folders created on demand.",
+  "GOOGLE_DRIVE_FOLDER_ID is optional and only sets the root those folders are created under.",
 ].join("\n");
 
 async function accessToken(): Promise<string> {
@@ -77,6 +78,71 @@ async function accessToken(): Promise<string> {
 /** Drive rejects a quoted boundary, so keep this to boundary-safe characters. */
 function makeBoundary(): string {
   return `render${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
+}
+
+const FOLDER_MIME = "application/vnd.google-apps.folder";
+
+function escapeQueryValue(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+}
+
+async function findFolder(token: string, name: string, parentId: string): Promise<string | null> {
+  const q = [
+    `mimeType = '${FOLDER_MIME}'`,
+    `name = '${escapeQueryValue(name)}'`,
+    `'${escapeQueryValue(parentId)}' in parents`,
+    "trashed = false",
+  ].join(" and ");
+
+  const url =
+    "https://www.googleapis.com/drive/v3/files" +
+    `?q=${encodeURIComponent(q)}&fields=files(id,name)&pageSize=1` +
+    "&supportsAllDrives=true&includeItemsFromAllDrives=true";
+
+  const response = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  if (!response.ok) throw new Error(explainDriveError(response.status, await response.text()));
+
+  const { files } = (await response.json()) as { files: Array<{ id: string }> };
+  return files.length > 0 ? files[0].id : null;
+}
+
+async function createFolder(token: string, name: string, parentId: string): Promise<string> {
+  const response = await fetch(
+    "https://www.googleapis.com/drive/v3/files?fields=id&supportsAllDrives=true",
+    {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ name, mimeType: FOLDER_MIME, parents: [parentId] }),
+    },
+  );
+  if (!response.ok) throw new Error(explainDriveError(response.status, await response.text()));
+
+  const { id } = (await response.json()) as { id: string };
+  return id;
+}
+
+/**
+ * Resolves a slash-separated folder path, creating any segment that does not
+ * exist yet — so a caller can just say "412 Birchwood Lane/2026-07" and get a
+ * folder, rather than having to provision one up front and carry its ID around.
+ *
+ * Note the scope boundary: with drive.file the server only sees files it created,
+ * so this finds and reuses folders *it* made. It will not silently adopt an
+ * unrelated folder of the same name that already existed in the account. To
+ * deliver into a folder someone else created, pass its ID explicitly instead.
+ */
+export async function ensureFolderPath(path: string, rootId?: string): Promise<string> {
+  const token = await accessToken();
+  const segments = path
+    .split("/")
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  let parent = rootId ?? process.env.GOOGLE_DRIVE_FOLDER_ID ?? "root";
+  for (const segment of segments) {
+    parent = (await findFolder(token, segment, parent)) ?? (await createFolder(token, segment, parent));
+  }
+  return parent;
 }
 
 export async function uploadToDrive(params: {

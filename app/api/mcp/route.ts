@@ -4,7 +4,7 @@ import { renderToPng, SIZES } from "../render/render";
 import { EXAMPLES, GUIDE, RULES_SUMMARY } from "../render/docs";
 import { checkImageSources, explainRenderError, lintMarkup } from "../render/lint";
 import { blobConfigured, selfDescribingUrl, uploadToBlob } from "../render/store";
-import { DRIVE_SETUP_HINT, deleteFromDrive, driveMode, uploadToDrive } from "../render/drive";
+import { DRIVE_SETUP_HINT, deleteFromDrive, driveMode, ensureFolderPath, uploadToDrive } from "../render/drive";
 
 const handler = createMcpHandler(
   (server) => {
@@ -112,10 +112,19 @@ const handler = createMcpHandler(
             .describe(
               "Upload the finished render straight into Google Drive and return a Drive link. The upload is server-to-server, so use this to deliver work to a client rather than fetching the image and re-uploading it yourself.",
             ),
+          driveFolder: z
+            .string()
+            .max(300)
+            .optional()
+            .describe(
+              "Destination folder as a slash-separated path, e.g. '412 Birchwood Lane/2026-07'. Any segment that does not exist is created, so there is nothing to set up in advance. Reuses folders this server created previously.",
+            ),
           driveFolderId: z
             .string()
             .optional()
-            .describe("Destination Drive folder. Defaults to the deployment's GOOGLE_DRIVE_FOLDER_ID."),
+            .describe(
+              "Exact destination folder ID. Use this only to deliver into a folder someone else created — otherwise prefer driveFolder and let the server manage the tree.",
+            ),
           fileName: z
             .string()
             .max(200)
@@ -129,7 +138,7 @@ const handler = createMcpHandler(
             ),
         }),
       },
-      async ({ markup, size, width, height, output, saveToDrive, driveFolderId, fileName }) => {
+      async ({ markup, size, width, height, output, saveToDrive, driveFolder, driveFolderId, fileName }) => {
         const { errors, warnings } = lintMarkup(markup);
         if (errors.length === 0) errors.push(...(await checkImageSources(markup)));
 
@@ -180,13 +189,16 @@ const handler = createMcpHandler(
               notes.push(`Drive upload skipped. ${DRIVE_SETUP_HINT}`);
             } else {
               try {
+                const folderId =
+                  driveFolderId ?? (driveFolder ? await ensureFolderPath(driveFolder) : undefined);
+
                 const uploaded = await uploadToDrive({
                   bytes: png,
                   name: fileName ?? `render-${new Date().toISOString().replace(/[:.]/g, "-")}.png`,
-                  folderId: driveFolderId,
+                  folderId,
                 });
                 notes.push(
-                  `Saved to Google Drive as "${uploaded.name}".`,
+                  `Saved to Google Drive as "${uploaded.name}"${driveFolder ? ` in ${driveFolder}` : ""}.`,
                   `Drive link: ${uploaded.webViewLink}`,
                   `Drive file ID: ${uploaded.fileId} — pass this to delete_drive_file to remove it.`,
                 );

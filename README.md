@@ -51,9 +51,20 @@ The URL comes from one of two backends, transparently:
 ## Delivering renders to Google Drive
 
 `render_image` takes `saveToDrive: true` and pushes the finished PNG straight into
-a Drive folder, returning a Drive link and file ID. `delete_drive_file` removes one
-again. Together they make the review loop fast: render into the client's folder,
-and if it is wrong, bin it and render another.
+Drive, returning a link and file ID. `delete_drive_file` removes one again. Together
+they make the review loop fast: render into the client's folder, and if it is wrong,
+bin it and render another.
+
+**Folders are created on demand.** Pass `driveFolder` as a path and any missing
+segment is created, so there is nothing to provision and no ID to carry around:
+
+```
+driveFolder: "412 Birchwood Lane/2026-07"
+```
+
+Folders the server created before are reused rather than duplicated. Pass
+`driveFolderId` instead only when delivering into a folder someone else made —
+with `drive.file` scope the server cannot see those by name.
 
 The upload is server-to-server. Nothing fetches the image in order to re-upload it,
 so delivering a 2 MB slide costs the caller a link rather than a context window.
@@ -85,7 +96,7 @@ land there, owned by you, visible to them — no consent flow for the client.
    GOOGLE_CLIENT_ID=...
    GOOGLE_CLIENT_SECRET=...
    GOOGLE_REFRESH_TOKEN=...
-   GOOGLE_DRIVE_FOLDER_ID=...    # the destination folder, from its Drive URL
+   GOOGLE_DRIVE_FOLDER_ID=...    # optional: root that driveFolder paths are created under
    ```
 
 6. Redeploy.
