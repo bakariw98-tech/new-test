@@ -4,6 +4,7 @@ import { renderToPng, SIZES } from "../render/render";
 import { EXAMPLES, GUIDE, RULES_SUMMARY } from "../render/docs";
 import { checkImageSources, explainRenderError, lintMarkup } from "../render/lint";
 import { blobConfigured, selfDescribingUrl, uploadToBlob } from "../render/store";
+import { DRIVE_SETUP_HINT, deleteFromDrive, driveMode, uploadToDrive } from "../render/drive";
 
 const handler = createMcpHandler(
   (server) => {
@@ -105,6 +106,21 @@ const handler = createMcpHandler(
             ),
           width: z.number().int().min(16).max(4096).optional().describe("Overrides the size preset."),
           height: z.number().int().min(16).max(4096).optional().describe("Overrides the size preset."),
+          saveToDrive: z
+            .boolean()
+            .default(false)
+            .describe(
+              "Upload the finished render straight into Google Drive and return a Drive link. The upload is server-to-server, so use this to deliver work to a client rather than fetching the image and re-uploading it yourself.",
+            ),
+          driveFolderId: z
+            .string()
+            .optional()
+            .describe("Destination Drive folder. Defaults to the deployment's GOOGLE_DRIVE_FOLDER_ID."),
+          fileName: z
+            .string()
+            .max(200)
+            .optional()
+            .describe("File name for the Drive upload, e.g. '412-birchwood-01-listing.png'. Defaults to a timestamped name."),
           output: z
             .enum(["url", "inline", "both"])
             .default("url")
@@ -113,7 +129,7 @@ const handler = createMcpHandler(
             ),
         }),
       },
-      async ({ markup, size, width, height, output }) => {
+      async ({ markup, size, width, height, output, saveToDrive, driveFolderId, fileName }) => {
         const { errors, warnings } = lintMarkup(markup);
         if (errors.length === 0) errors.push(...(await checkImageSources(markup)));
 
@@ -159,6 +175,29 @@ const handler = createMcpHandler(
             }
           }
 
+          if (saveToDrive) {
+            if (!driveMode()) {
+              notes.push(`Drive upload skipped. ${DRIVE_SETUP_HINT}`);
+            } else {
+              try {
+                const uploaded = await uploadToDrive({
+                  bytes: png,
+                  name: fileName ?? `render-${new Date().toISOString().replace(/[:.]/g, "-")}.png`,
+                  folderId: driveFolderId,
+                });
+                notes.push(
+                  `Saved to Google Drive as "${uploaded.name}".`,
+                  `Drive link: ${uploaded.webViewLink}`,
+                  `Drive file ID: ${uploaded.fileId} — pass this to delete_drive_file to remove it.`,
+                );
+              } catch (error) {
+                notes.push(
+                  `Drive upload failed (the render itself succeeded): ${error instanceof Error ? error.message : String(error)}`,
+                );
+              }
+            }
+          }
+
           notes.push(...warnings.map((w) => `Warning: ${w}`));
 
           const content: Array<
@@ -189,6 +228,49 @@ const handler = createMcpHandler(
                   GUIDE,
                 ].join("\n"),
               },
+            ],
+            isError: true,
+          };
+        }
+      },
+    );
+
+    server.registerTool(
+      "delete_drive_file",
+      {
+        title: "Delete Drive File",
+        description: [
+          "Deletes a file this server previously uploaded to Google Drive, by its Drive file ID.",
+          "",
+          "Intended for the review loop: render a slide into the client's Drive, and if it is not",
+          "right, delete it and render another. The server holds drive.file scope, so it can only",
+          "touch files it created — it cannot delete anything else in the account.",
+          "",
+          "Deleting is permanent, so confirm with the person before removing anything they may want.",
+        ].join("\n"),
+        annotations: {
+          destructiveHint: true,
+          idempotentHint: true,
+          openWorldHint: false,
+        },
+        inputSchema: z.object({
+          fileId: z
+            .string()
+            .min(1)
+            .describe("Drive file ID, as returned by render_image when saveToDrive was used."),
+        }),
+      },
+      async ({ fileId }) => {
+        if (!driveMode()) {
+          return { content: [{ type: "text", text: DRIVE_SETUP_HINT }], isError: true };
+        }
+        try {
+          await deleteFromDrive(fileId);
+          return { content: [{ type: "text", text: `Deleted Drive file ${fileId}.` }] };
+        } catch (error) {
+          return {
+            content: [
+              { type: "text", text: `Could not delete ${fileId}: ${error instanceof Error ? error.message : String(error)}` },
             ],
             isError: true,
           };

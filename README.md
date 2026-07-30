@@ -15,7 +15,8 @@ and one prompt — enough to exercise every MCP primitive without any other movi
 | Tool | `hello_world` | Greets the given `name` (defaults to `world`). The smoke test. |
 | Tool | `echo` | Returns `message` verbatim, confirming arguments round-trip intact. |
 | Tool | `server_time` | Current UTC time plus the Vercel region and environment it ran in. |
-| Tool | `render_image` | Renders HTML markup to a PNG at Instagram or OG sizes, returning a URL. |
+| Tool | `render_image` | Renders HTML markup to a PNG at Instagram or OG sizes, returning a URL. Optionally delivers straight to Google Drive. |
+| Tool | `delete_drive_file` | Removes a render this server uploaded to Drive. |
 | Resource | `hello://info` | Static text describing this server. |
 | Prompt | `greet` | Asks the model for a warm one-sentence greeting. |
 
@@ -46,6 +47,54 @@ The URL comes from one of two backends, transparently:
 - Otherwise a **self-describing URL** carrying the compressed markup, which
   re-renders on `GET`. Nothing to provision, immutably cacheable, but longer — a
   few hundred to a couple of thousand characters.
+
+## Delivering renders to Google Drive
+
+`render_image` takes `saveToDrive: true` and pushes the finished PNG straight into
+a Drive folder, returning a Drive link and file ID. `delete_drive_file` removes one
+again. Together they make the review loop fast: render into the client's folder,
+and if it is wrong, bin it and render another.
+
+The upload is server-to-server. Nothing fetches the image in order to re-upload it,
+so delivering a 2 MB slide costs the caller a link rather than a context window.
+
+### Which credentials
+
+This is the decision that determines whether it works at all:
+
+| Account | Use | Why |
+| --- | --- | --- |
+| Personal Gmail | **User OAuth** | A service account has no storage quota, so it cannot write to a personal My Drive — sharing the folder with it does *not* help. |
+| Workspace with a Shared Drive | Either | Files in a Shared Drive are owned by the drive, so a service account works. |
+
+For client delivery on a personal account, the practical pattern is: you authorise
+once with your own Google account, and you and the client share one folder. Renders
+land there, owned by you, visible to them — no consent flow for the client.
+
+### Setup (user OAuth)
+
+1. Google Cloud Console → new project → enable the **Google Drive API**.
+2. **OAuth consent screen** → External → add your own address as a test user.
+3. **Credentials** → Create OAuth client ID → *Desktop app*. Keep the client ID and secret.
+4. Get a refresh token once, with scope `https://www.googleapis.com/auth/drive.file`
+   — the [OAuth Playground](https://developers.google.com/oauthplayground) does this
+   without writing code (gear icon → "Use your own OAuth credentials").
+5. Set on the Vercel project:
+
+   ```
+   GOOGLE_CLIENT_ID=...
+   GOOGLE_CLIENT_SECRET=...
+   GOOGLE_REFRESH_TOKEN=...
+   GOOGLE_DRIVE_FOLDER_ID=...    # the destination folder, from its Drive URL
+   ```
+
+6. Redeploy.
+
+For a Shared Drive instead, set `GOOGLE_SERVICE_ACCOUNT_KEY` to the service-account
+JSON key and give that account write access to the drive.
+
+The scope is `drive.file`, so the server can only create files and manage the ones
+it created. It cannot read or delete anything else in the account.
 
 ## Rendering images
 
