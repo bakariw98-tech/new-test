@@ -4,6 +4,7 @@ const TOOLS = [
   ["hello_world", "Returns a friendly greeting. The connectivity smoke test."],
   ["echo", "Echoes text back verbatim, so you can confirm arguments round-trip."],
   ["server_time", "Current UTC time plus the Vercel region and environment."],
+  ["render_image", "Renders HTML markup to a PNG at Instagram or OG sizes."],
 ] as const;
 
 export default async function Home() {
@@ -79,6 +80,18 @@ export default async function Home() {
   -H 'Content-Type: application/json' \\
   -H 'Accept: application/json, text/event-stream' \\
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'`}</code>
+      </pre>
+
+      <h2>Render an image over plain HTTP</h2>
+      <p>
+        The same renderer behind <code>render_image</code> is exposed at <code>/api/render</code>,
+        which is handy for saving a PNG straight to disk.
+      </p>
+      <pre>
+        <code>{`curl -X POST ${proto}://${host}/api/render \\
+  -H 'Content-Type: application/json' \\
+  -d '{"size":"ig-portrait","markup":"<div style=\\"display:flex;width:100%;height:100%;background:#111;color:#fff;align-items:center;justify-content:center;font-size:96px\\">Hello</div>"}' \\
+  -o slide.png`}</code>
       </pre>
     </main>
   );
