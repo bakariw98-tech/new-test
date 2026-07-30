@@ -102,10 +102,15 @@ export async function GET(request: Request) {
         ? await pipeline.png().toBuffer()
         : await pipeline.jpeg({ quality: 88, mozjpeg: true }).toBuffer();
 
-    // Must be a plain Uint8Array: a Node Buffer is not a recognised BodyInit,
-    // so Response stringifies it and every byte above 0x7F becomes U+FFFD —
-    // a 200 response carrying corrupted bytes rather than an obvious failure.
-    const body = new Uint8Array(output.buffer, output.byteOffset, output.byteLength);
+    // Body must be a plain, zero-offset Uint8Array. A Node Buffer is not a
+    // recognised BodyInit, and neither is a Uint8Array view carrying a byte
+    // offset over sharp's pooled ArrayBuffer — in both cases Response falls back
+    // to stringifying, and the endpoint returns HTTP 200 with the correct
+    // content-type while the payload is the bytes rendered as text
+    // ("255,216,255,..."). Copying into a fresh array is what /api/render does,
+    // and it is the only form that survives both local Node and Vercel.
+    const body = new Uint8Array(output.byteLength);
+    body.set(output);
 
     return new Response(body, {
       headers: {
