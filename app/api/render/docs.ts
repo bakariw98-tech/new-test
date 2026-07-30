@@ -147,6 +147,10 @@ The URL comes from one of two backends, transparently:
 At 1080x1350 a typical slide is 100-200 KB of PNG and renders in well under a
 second. Composing a 10-slide carousel is ten cheap calls, not ten image
 generations — that is the entire point of this tool.
+
+Because renders return URLs rather than bytes, a ten-slide carousel costs about
+as much context as ten short lines of text. That is what makes the batch case
+practical at all.
 `;
 
 export const EXAMPLES = `# Working render_image examples

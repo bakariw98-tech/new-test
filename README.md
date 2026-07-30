@@ -15,9 +15,37 @@ and one prompt — enough to exercise every MCP primitive without any other movi
 | Tool | `hello_world` | Greets the given `name` (defaults to `world`). The smoke test. |
 | Tool | `echo` | Returns `message` verbatim, confirming arguments round-trip intact. |
 | Tool | `server_time` | Current UTC time plus the Vercel region and environment it ran in. |
-| Tool | `render_image` | Renders HTML markup to a PNG at Instagram or OG sizes. |
+| Tool | `render_image` | Renders HTML markup to a PNG at Instagram or OG sizes, returning a URL. |
 | Resource | `hello://info` | Static text describing this server. |
 | Prompt | `greet` | Asks the model for a warm one-sentence greeting. |
+
+## Renders return URLs, not bytes
+
+`render_image` returns a fetchable image URL by default and keeps the PNG
+server-side. This is the load-bearing design decision, not an optimisation.
+
+A 1080×1350 PNG is a couple of megabytes — millions of characters once
+base64-encoded. Returning that inline would consume a caller's entire context for
+one slide, and a ten-slide carousel would be impossible. Measured on a typical
+slide, returning a URL took the tool result from 87,106 characters to 427.
+
+It also keeps the result usable: an agent holding an inline image cannot hand it to
+an upload tool, but it can pass a URL anywhere.
+
+| `output` | Returns | Use for |
+| --- | --- | --- |
+| `url` (default) | Image URL | Anything programmatic. Pass the URL downstream. |
+| `inline` | Base64 PNG | Only when a person needs to see it in the conversation. |
+| `both` | Both | Someone looks at it *and* a later step needs the URL. |
+
+The URL comes from one of two backends, transparently:
+
+- **Vercel Blob** when `BLOB_READ_WRITE_TOKEN` is set on the deployment. Short,
+  permanent, CDN-backed, content-addressed so identical renders dedupe. Create a
+  Blob store in the Vercel dashboard and the token is added for you.
+- Otherwise a **self-describing URL** carrying the compressed markup, which
+  re-renders on `GET`. Nothing to provision, immutably cacheable, but longer — a
+  few hundred to a couple of thousand characters.
 
 ## Rendering images
 
