@@ -102,10 +102,15 @@ export async function GET(request: Request) {
         ? await pipeline.png().toBuffer()
         : await pipeline.jpeg({ quality: 88, mozjpeg: true }).toBuffer();
 
-    return new Response(output as unknown as BodyInit, {
+    // Must be a plain Uint8Array: a Node Buffer is not a recognised BodyInit,
+    // so Response stringifies it and every byte above 0x7F becomes U+FFFD —
+    // a 200 response carrying corrupted bytes rather than an obvious failure.
+    const body = new Uint8Array(output.buffer, output.byteOffset, output.byteLength);
+
+    return new Response(body, {
       headers: {
         "Content-Type": format === "png" ? "image/png" : "image/jpeg",
-        "Content-Length": String(output.byteLength),
+        "Content-Length": String(body.byteLength),
         "Cache-Control": "public, max-age=31536000, immutable",
       },
     });
