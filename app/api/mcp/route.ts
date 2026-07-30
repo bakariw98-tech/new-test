@@ -230,7 +230,7 @@ const handler = createMcpHandler(
               type: "text",
               text: [
                 `Build a ${slides}-slide Instagram carousel about: ${topic}`,
-                brand ? `Brand direction: ${brand}` : "",
+                ...(brand ? [`Brand direction: ${brand}`] : []),
                 "",
                 "Work in this order:",
                 "1. Read the `render://guide` and `render://examples` resources first.",
@@ -245,9 +245,7 @@ const handler = createMcpHandler(
                 "",
                 "Keep meaningful content out of the bottom 15% of each slide — the Instagram UI",
                 "covers it. Only Inter 400 and 700 are available.",
-              ]
-                .filter(Boolean)
-                .join("\n"),
+              ].join("\n"),
             },
           },
         ],
