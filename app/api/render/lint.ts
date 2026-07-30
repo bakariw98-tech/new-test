@@ -147,6 +147,14 @@ export async function checkImageSources(markup: string, timeoutMs = 5000): Promi
         if (type && !/^image\//i.test(type)) {
           return `Image URL ${url} served content-type "${type}" rather than an image. Satori cannot decode it and would omit it silently.`;
         }
+
+        // WebP and AVIF are images, so they pass the check above, but Satori
+        // cannot decode either — and it fails with a misleading message about
+        // dimensions. Route them through the normaliser instead.
+        if (/^image\/(webp|avif)$/i.test(type)) {
+          const format = type.split("/")[1].toLowerCase();
+          return `Image URL ${url} is ${format.toUpperCase()}, which cannot be decoded (it fails with a confusing "Image size cannot be determined" error). Wrap it: /api/image?src=${encodeURIComponent(url)}&w=1080 — that converts it to JPEG on the fly.`;
+        }
         return null;
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error);

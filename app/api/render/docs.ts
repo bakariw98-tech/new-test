@@ -90,6 +90,24 @@ This is where most silent failures come from, so it is worth being precise.
   always a bad image URL. This tool fetches image URLs before rendering and will
   name the broken one, but a URL that works once can still fail later.
 - \`object-fit: cover\` works and is usually what you want for a photo background.
+- **Formats: PNG, JPEG, GIF, SVG only. WebP and AVIF do not decode** — and they
+  fail with a misleading "Image size cannot be determined" error rather than
+  anything about the format. Since most modern exports and stock photos are WebP,
+  this comes up constantly.
+- For anything that is not already PNG or JPEG, or that needs resizing, route it
+  through the normaliser:
+
+  \`\`\`html
+  <img src="/api/image?src=https%3A%2F%2Fexample.com%2Fphoto.webp&w=1080&h=820"
+       style="width:1080px;height:820px;object-fit:cover" />
+  \`\`\`
+
+  \`/api/image\` fetches the source, converts to JPEG (or \`&fmt=png\`), optionally
+  resizes with \`w\`/\`h\`/\`fit\`, and caches the result immutably. Pre-sizing a large
+  photo there is much cheaper than making the renderer scale it on every call.
+  It also accepts Google Drive share links directly and rewrites them to a
+  direct-content URL — but the file must be shared as "anyone with the link",
+  because a private file is not fetchable by the server.
 - To lay text over a photo, absolutely position the image, then a gradient scrim,
   then the text — see example 4 in \`render://examples\`.
 
