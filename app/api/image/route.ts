@@ -1,4 +1,5 @@
 import sharp from "sharp";
+import { downloadFromDrive } from "../render/drive";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -34,9 +35,27 @@ function normaliseSource(raw: string): string {
 export async function GET(request: Request) {
   const params = new URL(request.url).searchParams;
   const rawSrc = params.get("src");
+  const driveId = params.get("drive");
+
+  // A file uploaded through /api/upload is readable with the server's own
+  // credentials, so it never has to be shared publicly.
+  if (driveId) {
+    try {
+      const { bytes } = await downloadFromDrive(driveId);
+      return convert(bytes, params);
+    } catch (error) {
+      return Response.json(
+        { error: error instanceof Error ? error.message : "Could not read that Drive file." },
+        { status: 502 },
+      );
+    }
+  }
 
   if (!rawSrc) {
-    return Response.json({ error: "Missing `src` parameter." }, { status: 400 });
+    return Response.json(
+      { error: "Missing `src` (a public image URL) or `drive` (a file ID from /api/upload)." },
+      { status: 400 },
+    );
   }
 
   let source: URL;
@@ -49,11 +68,6 @@ export async function GET(request: Request) {
   if (source.protocol !== "https:" && source.protocol !== "http:") {
     return Response.json({ error: "`src` must be an http(s) URL." }, { status: 400 });
   }
-
-  const width = clampDimension(params.get("w"));
-  const height = clampDimension(params.get("h"));
-  const fit = parseFit(params.get("fit"));
-  const format = params.get("fmt") === "png" ? "png" : "jpeg";
 
   let upstream: Response;
   try {
@@ -89,9 +103,19 @@ export async function GET(request: Request) {
     );
   }
 
+  const input = Buffer.from(await upstream.arrayBuffer());
+  return convert(input, params);
+}
+
+/** Re-encode to something Satori can decode, and optionally resize. */
+async function convert(input: Uint8Array, params: URLSearchParams): Promise<Response> {
+  const width = clampDimension(params.get("w"));
+  const height = clampDimension(params.get("h"));
+  const fit = parseFit(params.get("fit"));
+  const format = params.get("fmt") === "png" ? "png" : "jpeg";
+
   try {
-    const input = Buffer.from(await upstream.arrayBuffer());
-    let pipeline = sharp(input, { failOn: "none" }).rotate();
+    let pipeline = sharp(Buffer.from(input), { failOn: "none" }).rotate();
 
     if (width || height) {
       pipeline = pipeline.resize({ width, height, fit, withoutEnlargement: false });

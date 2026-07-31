@@ -199,6 +199,40 @@ export async function uploadToDrive(params: {
   };
 }
 
+/**
+ * Reads a file back out of Drive using the server's own credentials.
+ *
+ * This works precisely because `drive.file` grants access to files the app
+ * created — so anything uploaded through here can be fetched again later,
+ * without the file ever being made public. It cannot read anything else in the
+ * account, which is the property that makes this safe to point at a client's
+ * Drive.
+ */
+export async function downloadFromDrive(
+  fileId: string,
+): Promise<{ bytes: Uint8Array; mimeType: string }> {
+  const token = await accessToken();
+
+  const response = await fetch(
+    `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media&supportsAllDrives=true`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  );
+
+  if (!response.ok) {
+    throw new Error(
+      response.status === 404
+        ? `Drive has no file ${fileId} that this server created. Only files uploaded through this server can be read back — a file the account owns but the app did not create is not visible under drive.file scope.`
+        : explainDriveError(response.status, await response.text()),
+    );
+  }
+
+  const buffer = Buffer.from(await response.arrayBuffer());
+  const bytes = new Uint8Array(buffer.byteLength);
+  bytes.set(buffer);
+
+  return { bytes, mimeType: response.headers.get("content-type") ?? "application/octet-stream" };
+}
+
 export async function deleteFromDrive(fileId: string): Promise<void> {
   const token = await accessToken();
   const response = await fetch(
