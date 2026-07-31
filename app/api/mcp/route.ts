@@ -5,7 +5,7 @@ import { EXAMPLES, GUIDE, RULES_SUMMARY } from "../render/docs";
 import { checkImageSources, explainRenderError, lintMarkup } from "../render/lint";
 import { blobConfigured, selfDescribingUrl, uploadToBlob } from "../render/store";
 import { DRIVE_SETUP_HINT, deleteFromDrive, driveMode, ensureFolderPath, uploadToDrive } from "../render/drive";
-import { closingSlide, listingCard, tourSlide } from "../render/listing";
+import { closingSlide, listingCard, PRESETS, SAFE_BOTTOM, tourSlide } from "../render/listing";
 
 const handler = createMcpHandler(
   (server) => {
@@ -72,6 +72,13 @@ const handler = createMcpHandler(
           "Renders HTML markup to a PNG and returns the image. Use this to compose social assets",
           "— Instagram carousel slides, stories, OG cards — in code rather than generating them",
           "with an image model. Generate a hero asset once, then derive every format from it here.",
+          "",
+          "Can also deliver straight to Google Drive (saveToDrive: true) instead of just returning",
+          "a URL — see the saveToDrive/driveFolder/driveFolderId parameters below.",
+          "",
+          "For a real-estate listing specifically, prefer render_listing_carousel instead: it takes",
+          "listing data and photos directly, with no markup to write. Read render://listing-guide",
+          "before using it.",
           "",
           "Rendering is done by Satori, not a browser, so the CSS surface is a subset.",
           "",
@@ -255,6 +262,10 @@ const handler = createMcpHandler(
         description: [
           "Builds a complete real-estate carousel from listing data — no markup required.",
           "",
+          "Read render://listing-guide before the first use — it covers where photos come from,",
+          "how to write captions, and a full worked example. Read render://listing-presets to see",
+          "exact preset colours and fonts.",
+          "",
           "Prefer this over render_image for property posts. It produces the whole sequence in",
           "one call and enforces the things that are easy to get wrong by hand:",
           "- Slide 1 is the listing card: photo, price, address, beds/baths/sqft.",
@@ -270,7 +281,11 @@ const handler = createMcpHandler(
           "Photos may be public image URLs or file IDs returned by /api/upload. Formats that",
           "Satori cannot decode, such as WebP, are converted automatically.",
           "",
-          "Returns one URL per slide, in order. Set saveToDrive to deliver them to a folder.",
+          "Returns one URL per slide, in order. Set saveToDrive to deliver them to a folder — and",
+          "if the photos came from a folder the user already has, pass its ID as driveFolderId",
+          "rather than driveFolder. This server can only see folders it created itself, so naming",
+          "an existing folder by path creates a duplicate instead of saving into it. delete_drive_file",
+          "removes a slide by ID for the render-look-discard-rerender loop.",
         ].join("\n"),
         annotations: { readOnlyHint: false, openWorldHint: false },
         inputSchema: z.object({
@@ -468,6 +483,136 @@ const handler = createMcpHandler(
     );
 
     server.registerResource(
+      "listing-guide",
+      "render://listing-guide",
+      {
+        title: "Real Estate Carousel Guide",
+        description:
+          "How to use render_listing_carousel end to end: where photos come from, how the Drive folder arguments work, how to write captions, and a full worked example. Read this before building a property carousel — it is a different, simpler path than render_image.",
+        mimeType: "text/markdown",
+      },
+      async (uri) => ({
+        contents: [
+          {
+            uri: uri.href,
+            mimeType: "text/markdown",
+            text: `# Building a real-estate carousel
+
+For property posts, use \`render_listing_carousel\`, not \`render_image\`. It takes
+listing data and photos and returns a correct, complete carousel — no markup, and
+the layout rules (safe zone, brokerage attribution, a closing slide with a real
+call to action) are enforced by the server rather than left to you.
+
+## Where photos come from
+
+The server renders; it cannot read your files, your Drive, or the user's. Every
+photo needs a URL it can fetch:
+
+- **A Drive folder the user already has.** Read the folder to list the images,
+  make each one link-viewable, and pass its share URL. The folder's *name* is
+  often the address — split it on the first comma into \`street\` and
+  \`cityState\` rather than asking the user to retype it.
+- **\`POST /api/upload\`** (or the \`/upload\` page) if the user is handing you a
+  file directly. It stores privately and hands back a URL — nothing needs to be
+  shared.
+- WebP, AVIF, and oversized photos are converted and resized automatically; do
+  not pre-process them yourself.
+
+## Writing captions
+
+Caption every photo after the first honestly — describe what is actually in the
+frame ("Screened porch over the water"), not a generic real-estate line. If you
+have not looked at the photo, say so rather than inventing detail; a caption
+that describes something not in the shot is the one mistake a tool cannot catch
+for you.
+
+## Choosing a preset
+
+Read \`render://listing-presets\` for the exact values. In short:
+
+- **gallery** — bone and near-black, serif headlines. Default choice, reads
+  upmarket without shouting.
+- **estate** — charcoal and soft gold, serif. For the top of the market, where
+  the price is doing the talking.
+- **midnight** — navy and amber, sans-serif. Mid-market, more energetic.
+
+## Delivering to Drive
+
+Pass \`saveToDrive: true\` plus **one** of:
+
+- **\`driveFolderId\`** — use this whenever the user already has a folder for
+  this listing (e.g. the one the photos came from). This is almost always the
+  right choice once a folder exists.
+- **\`driveFolder\`** — a slash-separated path, created if missing. Use this only
+  when nothing exists yet.
+
+Getting this backwards is the one mistake worth flagging explicitly: this
+server can only see folders *it* created, so passing \`driveFolder\` with the
+name of a folder the user already made does not save into it — it silently
+creates a second, identical-looking folder alongside theirs. If a folder ID is
+already in hand from reading Drive, use it.
+
+\`delete_drive_file\` removes a slide by the file ID a previous call returned, for
+the review loop: render, look, delete what is wrong, render again.
+
+## Worked example
+
+\`\`\`json
+{
+  "preset": "gallery",
+  "listing": {
+    "badge": "JUST LISTED",
+    "price": "$2,750,000",
+    "street": "1428 Cypress Hollow Rd",
+    "cityState": "Ojai, CA 93023",
+    "beds": "4",
+    "baths": "3",
+    "sqft": "3,180"
+  },
+  "brand": {
+    "brokerage": "Bakari Realty Group",
+    "handle": "@bakarirealty",
+    "contact": "DM to book a showing"
+  },
+  "photos": [
+    { "url": "https://drive.google.com/file/d/.../view" },
+    { "url": "https://drive.google.com/file/d/.../view", "caption": "Glass wall opens the living room to the hills" },
+    { "url": "https://drive.google.com/file/d/.../view", "caption": "Walnut island seats five" },
+    { "url": "https://drive.google.com/file/d/.../view", "caption": "Evenings by the pool" }
+  ],
+  "closingHeadline": "Book a private showing",
+  "saveToDrive": true,
+  "driveFolderId": "<id of the folder the photos came from>"
+}
+\`\`\`
+
+The first photo becomes the listing card. The last photo also backs the closing
+slide. Everything renders at 1080x1350 (Instagram's best carousel ratio), with
+meaningful content kept above the bottom ${SAFE_BOTTOM}px, which Instagram's UI
+covers.
+`,
+          },
+        ],
+      }),
+    );
+
+    server.registerResource(
+      "listing-presets",
+      "render://listing-presets",
+      {
+        title: "Listing Carousel Presets",
+        description:
+          "The exact palette and typography values behind each render_listing_carousel preset (gallery, estate, midnight), as JSON. Read this to describe a preset accurately, or to see what a custom brand palette should be styled to match.",
+        mimeType: "application/json",
+      },
+      async (uri) => ({
+        contents: [
+          { uri: uri.href, mimeType: "application/json", text: JSON.stringify(PRESETS, null, 2) },
+        ],
+      }),
+    );
+
+    server.registerResource(
       "render-guide",
       "render://guide",
       {
@@ -552,6 +697,70 @@ const handler = createMcpHandler(
                 "",
                 "Keep meaningful content out of the bottom 15% of each slide — the Instagram UI",
                 "covers it. Only Inter 400 and 700 are available.",
+              ].join("\n"),
+            },
+          },
+        ],
+      }),
+    );
+
+    server.registerPrompt(
+      "listing_carousel",
+      {
+        title: "Build a Real Estate Carousel",
+        description:
+          "Builds an Instagram carousel for a property listing using render_listing_carousel, pulling photos from a named Drive folder.",
+        argsSchema: z.object({
+          driveFolderName: z
+            .string()
+            .min(1)
+            .describe("Name of the Drive folder holding the listing photos — often the address itself."),
+          price: z.string().min(1).describe("e.g. '$2,750,000'."),
+          beds: z.string().min(1),
+          baths: z.string().min(1),
+          sqft: z.string().min(1).describe("e.g. '3,180'."),
+          brokerage: z.string().min(1),
+          handle: z.string().default("").describe("e.g. '@bakarirealty'."),
+          contact: z
+            .string()
+            .default("DM to book a showing")
+            .describe("The ask on the closing slide."),
+          preset: z
+            .string()
+            .default("gallery")
+            .describe("gallery, estate, or midnight — see render://listing-presets."),
+        }),
+      },
+      ({ driveFolderName, price, beds, baths, sqft, brokerage, handle, contact, preset }) => ({
+        messages: [
+          {
+            role: "user",
+            content: {
+              type: "text",
+              text: [
+                "Build an Instagram carousel for a property listing. Work in this order:",
+                "",
+                "1. Read render://listing-guide first.",
+                `2. Find the Drive folder named: ${driveFolderName}`,
+                "   Note its folder ID — you will need it in step 5.",
+                "3. The folder name is usually the address. Split it on the first comma:",
+                "   street = everything before, cityState = everything after.",
+                "4. List the images in that folder, in order. Make each link-viewable if it is not",
+                "   already, and use its share URL as the photo URL.",
+                "5. Call render_listing_carousel:",
+                `     preset:      ${preset}`,
+                "     listing:     street and cityState from step 3, plus",
+                `                  price ${price}, beds ${beds}, baths ${baths}, sqft ${sqft}`,
+                "     brand:       brokerage " + JSON.stringify(brokerage) +
+                  (handle ? `, handle ${JSON.stringify(handle)}` : "") +
+                  `, contact ${JSON.stringify(contact)}`,
+                "     photos:      the folder's images in order — the first becomes the listing",
+                "                  card. Write a short, honest caption for each of the rest",
+                "                  describing what is actually in that shot.",
+                "     saveToDrive: true",
+                "     driveFolderId: the ID from step 2 — not driveFolder, which would create a",
+                "                    second folder instead of using the one the photos came from.",
+                "6. List the returned slide URLs in order.",
               ].join("\n"),
             },
           },
