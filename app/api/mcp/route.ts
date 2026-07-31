@@ -326,10 +326,18 @@ const handler = createMcpHandler(
             .string()
             .max(300)
             .optional()
-            .describe("Folder path, created on demand, e.g. '1166 San Ysidro Dr/2026-07'."),
+            .describe(
+              "Folder path, created on demand, e.g. '1166 San Ysidro Dr/2026-07'. Only use this when the destination does not exist yet — this server cannot see folders it did not create, so naming an existing one here produces a duplicate alongside it.",
+            ),
+          driveFolderId: z
+            .string()
+            .optional()
+            .describe(
+              "ID of an existing folder to deliver into — the correct choice when the photos came from a folder the user already had. Take the ID from whatever listed that folder. Wins over driveFolder.",
+            ),
         }),
       },
-      async ({ preset, listing, brand, photos, closingHeadline, saveToDrive, driveFolder }) => {
+      async ({ preset, listing, brand, photos, closingHeadline, saveToDrive, driveFolder, driveFolderId }) => {
         const slides: Array<{ name: string; markup: string }> = [
           {
             name: "01-listing-card",
@@ -380,7 +388,8 @@ const handler = createMcpHandler(
 
             let delivered = "";
             if (saveToDrive && driveMode()) {
-              const folderId = driveFolder ? await ensureFolderPath(driveFolder) : undefined;
+              const folderId =
+                driveFolderId ?? (driveFolder ? await ensureFolderPath(driveFolder) : undefined);
               const uploaded = await uploadToDrive({
                 bytes: png,
                 name: `${slide.name}.png`,
