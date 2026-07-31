@@ -42,6 +42,10 @@ const PRESETS = {
     headingFont: "Inter",
     bodyFont: "Inter",
     headingWeight: 700,
+    // How this look behaves on top of a photograph.
+    scrimFrom: "rgba(16,24,40,0.45)",
+    scrimTo: "rgba(16,24,40,0.85)",
+    onPhotoText: "#FFFFFF",
   },
   // Warm bone and charcoal with soft gold, serif headings. For high-end listings
   // where the number on the card is doing the talking.
@@ -55,6 +59,9 @@ const PRESETS = {
     headingFont: "Playfair Display",
     bodyFont: "Inter",
     headingWeight: 700,
+    scrimFrom: "rgba(18,16,14,0.35)",
+    scrimTo: "rgba(18,16,14,0.88)",
+    onPhotoText: "#F7F3EC",
   },
   // Light, airy, architectural. Good for modern new-builds.
   gallery: {
@@ -67,6 +74,9 @@ const PRESETS = {
     headingFont: "DM Serif Display",
     bodyFont: "Inter",
     headingWeight: 400,
+    scrimFrom: "rgba(244,241,236,0)",
+    scrimTo: "rgba(244,241,236,0.96)",
+    onPhotoText: "#1A1A1A",
   },
 };
 
@@ -144,15 +154,18 @@ function tourSlide({
   ...overrides
 } = {}) {
   const theme = { ...(PRESETS[preset] ?? PRESETS.midnight), ...overrides };
-  const { accentColor, bgColor, textColor, headingFont, headingWeight } = theme;
-  return `<div style="display:flex;position:relative;width:100%;height:100%;background-color:${bgColor};font-family:Inter">
+  const {
+    accentColor, bgColor, bodyFont, headingFont, headingWeight,
+    scrimFrom, scrimTo, onPhotoText,
+  } = theme;
+  return `<div style="display:flex;position:relative;width:100%;height:100%;background-color:${bgColor};font-family:${bodyFont}">
   <img src="${normalised(photo, 1080, 1350)}" style="position:absolute;left:0;top:0;width:1080px;height:1350px;object-fit:cover" />
-  <div style="display:flex;position:absolute;left:0;top:0;width:1080px;height:1350px;background:linear-gradient(180deg,rgba(16,24,40,0.45) 0%,rgba(16,24,40,0) 30%,rgba(16,24,40,0.85) 100%)"></div>
+  <div style="display:flex;position:absolute;left:0;top:0;width:1080px;height:1350px;background:linear-gradient(180deg,${scrimFrom} 0%,${scrimFrom} 28%,${scrimTo} 100%)"></div>
   <div style="display:flex;position:absolute;left:56px;top:56px;background-color:${bgColor};border-radius:12px;padding:14px 24px">
     <div style="display:flex;color:${accentColor};font-size:30px;font-weight:700">${index} / ${total}</div>
   </div>
   <div style="display:flex;flex-direction:column;position:absolute;left:0;bottom:0;width:1080px;padding:0 64px 190px 64px">
-    <div style="display:flex;color:${textColor};font-size:60px;font-weight:${headingWeight};font-family:${headingFont};line-height:1.15">${caption}</div>
+    <div style="display:flex;color:${onPhotoText};font-size:60px;font-weight:${headingWeight};font-family:${headingFont};line-height:1.15">${caption}</div>
   </div>
 </div>`;
 }
