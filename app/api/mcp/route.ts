@@ -5,6 +5,7 @@ import { EXAMPLES, GUIDE, RULES_SUMMARY } from "../render/docs";
 import { checkImageSources, explainRenderError, lintMarkup } from "../render/lint";
 import { blobConfigured, selfDescribingUrl, uploadToBlob } from "../render/store";
 import { DRIVE_SETUP_HINT, deleteFromDrive, driveMode, ensureFolderPath, uploadToDrive } from "../render/drive";
+import { closingSlide, listingCard, tourSlide } from "../render/listing";
 
 const handler = createMcpHandler(
   (server) => {
@@ -244,6 +245,173 @@ const handler = createMcpHandler(
             isError: true,
           };
         }
+      },
+    );
+
+    server.registerTool(
+      "render_listing_carousel",
+      {
+        title: "Render Listing Carousel",
+        description: [
+          "Builds a complete real-estate carousel from listing data — no markup required.",
+          "",
+          "Prefer this over render_image for property posts. It produces the whole sequence in",
+          "one call and enforces the things that are easy to get wrong by hand:",
+          "- Slide 1 is the listing card: photo, price, address, beds/baths/sqft.",
+          "- Middle slides are photos with captions.",
+          "- The last slide always asks for the booking, with the contact details visible.",
+          "- Captions stay clear of the bottom of the frame, which Instagram's UI covers.",
+          "- Every slide carries the brokerage, so a screenshot stays attributed.",
+          "- One preset drives palette and typography across the set, so it reads as one post.",
+          "",
+          "Presets: 'gallery' (bone and black, serif — high-end), 'estate' (charcoal and gold,",
+          "serif — luxury), 'midnight' (navy and amber, sans — mid-market).",
+          "",
+          "Photos may be public image URLs or file IDs returned by /api/upload. Formats that",
+          "Satori cannot decode, such as WebP, are converted automatically.",
+          "",
+          "Returns one URL per slide, in order. Set saveToDrive to deliver them to a folder.",
+        ].join("\n"),
+        annotations: { readOnlyHint: false, openWorldHint: false },
+        inputSchema: z.object({
+          preset: z
+            .enum(["gallery", "estate", "midnight"])
+            .default("gallery")
+            .describe("Visual system for the whole carousel."),
+          listing: z
+            .object({
+              badge: z.string().max(40).default("JUST LISTED"),
+              price: z.string().max(40).describe("Formatted, e.g. '$8,495,000'."),
+              street: z.string().max(120),
+              cityState: z.string().max(120).describe("e.g. 'Beverly Hills, CA 90210'."),
+              beds: z.string().max(10),
+              baths: z.string().max(10),
+              sqft: z.string().max(15).describe("Formatted, e.g. '5,207'."),
+            })
+            .describe("Listing facts shown on the card."),
+          brand: z
+            .object({
+              brokerage: z.string().max(80).describe("Shown on every slide."),
+              handle: z.string().max(60).optional().describe("e.g. '@bakarirealty'."),
+              contact: z
+                .string()
+                .max(80)
+                .optional()
+                .describe("The ask on the final slide, e.g. 'DM to schedule' or a phone number."),
+            })
+            .describe("Who this post belongs to and how to reach them."),
+          photos: z
+            .array(
+              z.object({
+                url: z.string().min(1).describe("Image URL, or a file ID from /api/upload."),
+                caption: z
+                  .string()
+                  .max(120)
+                  .optional()
+                  .describe("Short line describing what is in the shot. Skipped on the first photo, which becomes the card."),
+              }),
+            )
+            .min(1)
+            .max(20)
+            .describe(
+              "Photos in order. The first becomes the listing card; the last also backs the closing slide. Instagram allows 20 slides.",
+            ),
+          closingHeadline: z
+            .string()
+            .max(120)
+            .default("Book a private showing")
+            .describe("Headline on the final slide."),
+          saveToDrive: z.boolean().default(false),
+          driveFolder: z
+            .string()
+            .max(300)
+            .optional()
+            .describe("Folder path, created on demand, e.g. '1166 San Ysidro Dr/2026-07'."),
+        }),
+      },
+      async ({ preset, listing, brand, photos, closingHeadline, saveToDrive, driveFolder }) => {
+        const slides: Array<{ name: string; markup: string }> = [
+          {
+            name: "01-listing-card",
+            markup: listingCard({ photo: photos[0].url, listing, brand, preset }),
+          },
+        ];
+
+        const middle = photos.slice(1);
+        const total = middle.length + 2;
+        middle.forEach((photo, i) => {
+          slides.push({
+            name: `${String(i + 2).padStart(2, "0")}-photo`,
+            markup: tourSlide({
+              photo: photo.url,
+              caption: photo.caption,
+              index: i + 2,
+              total,
+              brand,
+              preset,
+            }),
+          });
+        });
+
+        slides.push({
+          name: `${String(total).padStart(2, "0")}-closing`,
+          markup: closingSlide({
+            photo: photos[photos.length - 1].url,
+            headline: closingHeadline,
+            listing,
+            brand,
+            preset,
+          }),
+        });
+
+        const lines: string[] = [];
+        let failures = 0;
+
+        for (const slide of slides) {
+          try {
+            const png = await renderToPng({ markup: slide.markup, size: "ig-portrait" });
+
+            let reference: string;
+            if (blobConfigured()) {
+              reference = await uploadToBlob(png);
+            } else {
+              reference = selfDescribingUrl({ markup: slide.markup, size: "ig-portrait" }).url;
+            }
+
+            let delivered = "";
+            if (saveToDrive && driveMode()) {
+              const folderId = driveFolder ? await ensureFolderPath(driveFolder) : undefined;
+              const uploaded = await uploadToDrive({
+                bytes: png,
+                name: `${slide.name}.png`,
+                folderId,
+              });
+              delivered = `  Drive: ${uploaded.webViewLink}`;
+            } else if (saveToDrive) {
+              delivered = "  Drive upload skipped (not configured on this deployment)";
+            }
+
+            lines.push(`${slide.name}: ${reference}${delivered}`);
+          } catch (error) {
+            failures += 1;
+            lines.push(
+              `${slide.name}: FAILED — ${explainRenderError(error instanceof Error ? error.message : String(error))}`,
+            );
+          }
+        }
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: [
+                `Rendered ${slides.length - failures}/${slides.length} slides at 1080x1350, preset "${preset}".`,
+                ...lines,
+              ].join("\n"),
+            },
+          ],
+          isError: failures > 0,
+        };
       },
     );
 

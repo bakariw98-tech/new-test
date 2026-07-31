@@ -163,6 +163,32 @@ no LUTs, curves, or per-channel controls.
 
 Or pass explicit \`width\` and \`height\` up to 4096.
 
+## Making a carousel that works
+
+For property posts, prefer the \`render_listing_carousel\` tool — it applies all of
+this automatically and needs data rather than markup. What follows matters when
+composing something by hand.
+
+These are the rules that separate a post that performs from one that looks
+almost right:
+
+1. **Keep content above the bottom ~260px.** Instagram's UI covers roughly the
+   bottom 15% of a 4:5 frame. A caption sitting at 84% down looks fine in
+   isolation and gets clipped in the feed.
+2. **The last slide must ask for something specific**, with the means to act
+   visible on it — a handle, a phone number, "DM to book". A carousel that ends
+   on a nice photo wastes the attention it earned.
+3. **Put the brand on every slide.** Any slide can be screenshotted and reshared
+   on its own; an unattributed one is free advertising for nobody.
+4. **Match the scrim to the palette.** A light look needs a light scrim with dark
+   type; a dark look needs the reverse. A dark scrim under dark text is
+   invisible, and the render will not warn you.
+5. **Beware captions over busy areas.** A scrim cannot create contrast where the
+   photo is already the same tone as the type. If the bottom third is bright and
+   detailed, either strengthen the scrim or move the caption.
+6. **One visual system across the set.** Same palette, same type scale, same
+   spacing on every slide, or it reads as separate posts stuck together.
+
 ## Designing for Instagram
 
 - Every slide in a carousel must be the **same aspect ratio**, or Instagram crops

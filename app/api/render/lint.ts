@@ -88,6 +88,19 @@ export function lintMarkup(markup: string): LintResult {
     );
   }
 
+  // Instagram covers roughly the bottom 15% of a 4:5 frame. Content pinned
+  // closer than that to the bottom edge looks correct in the render and gets
+  // clipped in the feed, which is invisible until someone posts it.
+  for (const match of markup.matchAll(/bottom\s*:\s*(\d+)px/gi)) {
+    const offset = Number(match[1]);
+    if (offset > 0 && offset < 200) {
+      warnings.push(
+        `An element is pinned ${offset}px from the bottom. Instagram's UI covers about the bottom 200px of a 1080x1350 post — keep meaningful content above roughly 260px.`,
+      );
+      break;
+    }
+  }
+
   const weights = [...markup.matchAll(/font-weight\s*:\s*(\d{3})/gi)].map((m) => m[1]);
   const unsupported = [...new Set(weights.filter((w) => w !== "400" && w !== "700"))];
   if (unsupported.length > 0) {
