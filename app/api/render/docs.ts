@@ -120,6 +120,26 @@ This is where most silent failures come from, so it is worth being precise.
 - To lay text over a photo, absolutely position the image, then a gradient scrim,
   then the text — see example 4 in \`render://examples\`.
 
+### Getting an image in
+
+Renders happen server-side, so the server has to be able to reach the image. It
+has no access to your files, your Drive, or your machine.
+
+**Give it a URL.** This is the normal path and the only one that scales. If the
+image lives somewhere private, whoever holds that access — you, the user, or
+another agent with a Drive or storage connector — exports it or makes it
+link-readable first, then passes the URL here.
+
+**Do not route image bytes through yourself.** Fetching a photo in order to
+re-send it as a data URI does not work: a 500 KB photo is roughly 700,000
+characters base64, so a single image can exhaust a context window, and the markup
+limit rejects it anyway. Data URIs are viable only for genuinely small assets —
+logos, icons, marks under about 50 KB.
+
+**If the URL 502s here**, it is almost always still private. A Google Drive link
+that has not been shared returns an HTML sign-in page rather than image bytes,
+and \`/api/image\` will say so explicitly.
+
 ## Colour, background, effects
 
 \`background\` / \`backgroundColor\`, \`linear-gradient(...)\`, \`radial-gradient(...)\`,
