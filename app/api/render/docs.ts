@@ -43,6 +43,27 @@ Supported: \`display: flex\`, \`flexDirection\`, \`justifyContent\`, \`alignItem
 
 Not supported: grid, float, \`position: fixed\`, \`position: sticky\`.
 
+**\`transform\` and \`clip-path\` need \`display: flex\` on that same element**, even
+if it has no children. Satori wraps a transformed or clipped element internally,
+and without an explicit \`display\` the wrapper trips the same "more than one
+child" error used for real layout mistakes — which reads as a markup problem
+when it is really this one specific quirk:
+
+\`\`\`html
+<!-- throws "more than one child node", even though this div has none -->
+<div style="width:200px;height:200px;background:#0ff;transform:rotate(8deg)"></div>
+
+<!-- fixed -->
+<div style="display:flex;width:200px;height:200px;background:#0ff;transform:rotate(8deg)"></div>
+\`\`\`
+
+Both work well for genuine dynamism when the default centered-rectangle look is
+too static: \`clip-path: polygon(...)\` cuts an image or panel on a diagonal
+instead of a flat edge, and a small \`transform: rotate(-3deg)\` on a badge or
+chip reads as an intentional accent. Keep rotation off anything that has to be
+read at a glance — prices, addresses, a call-to-action button — and reserve it
+for decorative elements: tags, corner accents, photo captions' backing chips.
+
 **Children stretch by default.** In a \`flex-direction: column\`, every child fills
 the full width unless told otherwise. A pill button or badge written without
 \`align-self: flex-start\` will span the entire slide and look wrong:

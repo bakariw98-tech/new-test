@@ -12,8 +12,30 @@ import { publicOrigin } from "./store";
  */
 
 const CANVAS = { width: 1080, height: 1350 };
-const BAND_HEIGHT = 820;
+const BAND_HEIGHT = 800;
 const PANEL_HEIGHT = CANVAS.height - BAND_HEIGHT;
+
+/**
+ * The listing card's photo meets its data panel on a diagonal, not a flat line —
+ * the shape that makes the layout read as designed rather than stacked boxes.
+ * A thin accent-coloured seam runs parallel to the cut, offset below it.
+ *
+ * DIAGONAL_DROP is how much lower the cut sits on the left than the right.
+ * Satori requires `display:flex` on any element using `clip-path` or
+ * `transform` — without it, Satori's own internal wrapper trips the
+ * "more than one child" check, which is not documented anywhere and reads as
+ * a markup error when it is really a Satori quirk.
+ */
+const DIAGONAL_DROP = 84;
+const SEAM_THICKNESS = 10;
+
+/** A straight cut from bottom-left (deep) to a shallower top-right, as a clip-path. */
+function diagonalClip(rightY: number, leftY: number): { clipPath: string; boxHeight: number } {
+  return {
+    clipPath: `polygon(0 0, 100% 0, 100% ${((rightY / leftY) * 100).toFixed(3)}%, 0 100%)`,
+    boxHeight: leftY,
+  };
+}
 
 /**
  * Instagram's UI overlays roughly the bottom 15% (~202px) of a 4:5 frame.
@@ -118,6 +140,15 @@ function escapeHtml(value: string): string {
     .replace(/"/g, "&quot;");
 }
 
+/**
+ * A small diagonal accent ribbon in the top-right corner — the same geometric
+ * signature as the listing card's cut, repeated small, so the photo-only slides
+ * still read as part of one designed system rather than a plain photo dump.
+ */
+function cornerRibbon(theme: Preset): string {
+  return `<div style="display:flex;position:absolute;right:0;top:0;width:170px;height:170px;background-color:${theme.accentColor};clip-path:polygon(100% 0, 100% 100%, 0 0);opacity:0.92"></div>`;
+}
+
 /** Small brokerage mark, carried on every slide so a screenshot stays attributed. */
 function brandMark(brand: Brand, theme: Preset, onPhoto: boolean): string {
   const label = brand.brokerage ?? brand.handle;
@@ -140,43 +171,54 @@ export function listingCard(options: {
   const l = options.listing ?? {};
   const brand = options.brand ?? {};
 
-  const band = options.photo
-    ? `<img src="${photoUrl(options.photo, CANVAS.width, BAND_HEIGHT)}" style="position:absolute;left:0;top:0;width:${CANVAS.width}px;height:${BAND_HEIGHT}px;object-fit:cover" />
-       <div style="display:flex;position:absolute;left:0;top:0;width:${CANVAS.width}px;height:${BAND_HEIGHT}px;background:linear-gradient(180deg,rgba(0,0,0,0.42) 0%,rgba(0,0,0,0.04) 34%,rgba(0,0,0,0.12) 100%)"></div>`
-    : `<div style="display:flex;position:absolute;left:0;top:0;width:100%;height:${BAND_HEIGHT}px;background-color:${theme.bandColor}"></div>`;
+  const seam = diagonalClip(BAND_HEIGHT + SEAM_THICKNESS, BAND_HEIGHT + DIAGONAL_DROP + SEAM_THICKNESS);
+  const cut = diagonalClip(BAND_HEIGHT, BAND_HEIGHT + DIAGONAL_DROP);
 
-  const stat = (value: string, label: string) =>
-    `<div style="display:flex;flex-direction:column;align-items:flex-start">
-      <div style="display:flex;color:${theme.accentColor};font-size:48px;font-weight:700">${escapeHtml(value)}</div>
-      <div style="display:flex;color:${theme.mutedColor};font-size:28px">${label}</div>
-    </div>`;
-
-  const footerRight = brand.handle ?? "Swipe for tour →";
-
-  return `<div style="display:flex;flex-direction:column;width:100%;height:100%;background-color:${theme.bgColor};position:relative;font-family:${theme.bodyFont}">
-  ${band}
-  <div style="display:flex;position:absolute;left:56px;top:56px;background-color:${theme.accentColor};border-radius:12px;padding:16px 28px">
-    <div style="display:flex;color:${theme.bgColor};font-size:34px;font-weight:700">${escapeHtml(l.badge ?? "JUST LISTED")}</div>
-  </div>
-  <div style="display:flex;position:absolute;right:56px;top:56px;background-color:${theme.bgColor};border-radius:12px;padding:16px 28px">
-    <div style="display:flex;color:${theme.accentColor};font-size:34px;font-weight:${theme.headingWeight};font-family:${theme.headingFont}">${escapeHtml(l.price ?? "")}</div>
-  </div>
-  <div style="display:flex;flex-direction:column;position:absolute;left:0;top:${BAND_HEIGHT}px;width:100%;height:${PANEL_HEIGHT}px;background-color:${theme.bgColor};padding:56px 64px;justify-content:space-between">
+  // Panel first (bottom of the stack), then the seam, then the photo — each
+  // painted over the last so the diagonal edge shows as a cut through the panel
+  // rather than being hidden behind its flat top edge.
+  const panel = `<div style="display:flex;flex-direction:column;position:absolute;left:0;top:${BAND_HEIGHT}px;width:100%;height:${PANEL_HEIGHT}px;background-color:${theme.bgColor};padding:${56 + DIAGONAL_DROP}px 64px 56px 64px;justify-content:space-between">
     <div style="display:flex;flex-direction:column">
       <div style="display:flex;color:${theme.textColor};font-size:56px;font-weight:${theme.headingWeight};font-family:${theme.headingFont}">${escapeHtml(l.street ?? "")}</div>
       <div style="display:flex;color:${theme.mutedColor};font-size:36px;margin-top:12px">${escapeHtml(l.cityState ?? "")}</div>
     </div>
     <div style="display:flex;width:100%;height:2px;background-color:${theme.dividerColor}"></div>
     <div style="display:flex;flex-direction:row;justify-content:space-between">
-      ${stat(l.beds ?? "—", "Beds")}
-      ${stat(l.baths ?? "—", "Baths")}
-      ${stat(l.sqft ?? "—", "Sq Ft")}
+      ${["Beds", "Baths", "Sq Ft"]
+        .map(
+          (label, i) =>
+            `<div style="display:flex;flex-direction:column;align-items:flex-start">
+              <div style="display:flex;color:${theme.accentColor};font-size:48px;font-weight:700">${escapeHtml([l.beds, l.baths, l.sqft][i] ?? "—")}</div>
+              <div style="display:flex;color:${theme.mutedColor};font-size:28px">${label}</div>
+            </div>`,
+        )
+        .join("")}
     </div>
     <div style="display:flex;flex-direction:row;align-items:center;justify-content:space-between">
       <div style="display:flex;color:${theme.textColor};font-size:32px;font-weight:700">${escapeHtml(brand.brokerage ?? "")}</div>
-      <div style="display:flex;color:${theme.accentColor};font-size:32px">${escapeHtml(footerRight)}</div>
+      <div style="display:flex;color:${theme.accentColor};font-size:32px">${escapeHtml(brand.handle ?? "Swipe for tour →")}</div>
     </div>
+  </div>`;
+
+  const seamDiv = `<div style="display:flex;position:absolute;left:0;top:0;width:${CANVAS.width}px;height:${seam.boxHeight}px;background-color:${theme.accentColor};clip-path:${seam.clipPath}"></div>`;
+
+  const band = options.photo
+    ? `<img src="${photoUrl(options.photo, CANVAS.width, BAND_HEIGHT + DIAGONAL_DROP)}" style="display:flex;position:absolute;left:0;top:0;width:${CANVAS.width}px;height:${cut.boxHeight}px;object-fit:cover;clip-path:${cut.clipPath}" />
+       <div style="display:flex;position:absolute;left:0;top:0;width:${CANVAS.width}px;height:${cut.boxHeight}px;clip-path:${cut.clipPath};background:linear-gradient(180deg,rgba(0,0,0,0.42) 0%,rgba(0,0,0,0.04) 34%,rgba(0,0,0,0.12) 100%)"></div>`
+    : `<div style="display:flex;position:absolute;left:0;top:0;width:${CANVAS.width}px;height:${cut.boxHeight}px;background-color:${theme.bandColor};clip-path:${cut.clipPath}"></div>`;
+
+  const chips = `<div style="display:flex;position:absolute;left:56px;top:56px;background-color:${theme.accentColor};border-radius:10px;padding:16px 28px;transform:rotate(-3deg)">
+    <div style="display:flex;color:${theme.bgColor};font-size:34px;font-weight:700">${escapeHtml(l.badge ?? "JUST LISTED")}</div>
   </div>
+  <div style="display:flex;position:absolute;right:56px;top:56px;background-color:${theme.bgColor};border-radius:12px;padding:16px 28px">
+    <div style="display:flex;color:${theme.accentColor};font-size:34px;font-weight:${theme.headingWeight};font-family:${theme.headingFont}">${escapeHtml(l.price ?? "")}</div>
+  </div>`;
+
+  return `<div style="display:flex;flex-direction:column;width:100%;height:100%;background-color:${theme.bgColor};position:relative;font-family:${theme.bodyFont}">
+  ${panel}
+  ${seamDiv}
+  ${band}
+  ${chips}
 </div>`;
 }
 
@@ -194,7 +236,7 @@ export function tourSlide(options: {
 
   const counter =
     options.index && options.total
-      ? `<div style="display:flex;position:absolute;left:56px;top:56px;background-color:${theme.bgColor};border-radius:12px;padding:14px 24px">
+      ? `<div style="display:flex;position:absolute;left:56px;top:56px;background-color:${theme.bgColor};border-radius:12px;padding:14px 24px;transform:rotate(-3deg)">
            <div style="display:flex;color:${theme.accentColor};font-size:30px;font-weight:700">${options.index} / ${options.total}</div>
          </div>`
       : "";
@@ -208,6 +250,7 @@ export function tourSlide(options: {
   return `<div style="display:flex;position:relative;width:100%;height:100%;background-color:${theme.bgColor};font-family:${theme.bodyFont}">
   <img src="${photoUrl(options.photo, CANVAS.width, CANVAS.height)}" style="position:absolute;left:0;top:0;width:${CANVAS.width}px;height:${CANVAS.height}px;object-fit:cover" />
   <div style="display:flex;position:absolute;left:0;top:0;width:${CANVAS.width}px;height:${CANVAS.height}px;background:linear-gradient(180deg,${theme.scrimFrom} 0%,${theme.scrimFrom} 42%,${theme.scrimTo} 100%)"></div>
+  ${cornerRibbon(theme)}
   ${counter}
   ${caption}
   ${brandMark(brand, theme, true)}
@@ -248,6 +291,7 @@ export function closingSlide(options: {
 
   return `<div style="display:flex;position:relative;width:100%;height:100%;background-color:${theme.bgColor};font-family:${theme.bodyFont}">
   ${background}
+  ${cornerRibbon(theme)}
   <div style="display:flex;flex-direction:column;position:absolute;left:0;bottom:${SAFE_BOTTOM}px;width:${CANVAS.width}px;padding:0 64px">
     <div style="display:flex;color:${theme.onPhotoText};font-size:64px;font-weight:${theme.headingWeight};font-family:${theme.headingFont};line-height:1.12">${escapeHtml(options.headline ?? "Book a private showing")}</div>
     ${address ? `<div style="display:flex;color:${theme.onPhotoText};font-size:30px;margin-top:18px;opacity:0.8">${escapeHtml(address)}</div>` : ""}

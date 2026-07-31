@@ -76,6 +76,23 @@ export function lintMarkup(markup: string): LintResult {
     }
   }
 
+  // Satori wraps a transformed/clipped element internally; without an explicit
+  // display on that same element, Satori's own wrapper trips the "more than one
+  // child" check — regardless of how many real children the element has. This
+  // reads as a layout mistake but is really this one quirk, so it gets its own
+  // message rather than falling through to the generic Satori error.
+  for (const tag of markup.match(/<[a-z][^>]*>/gi) ?? []) {
+    const style = /\sstyle\s*=\s*["']([^"']*)["']/i.exec(tag)?.[1] ?? "";
+    const hasTransformOrClip = /(^|;)\s*(transform|clip-path)\s*:/i.test(style);
+    const hasDisplay = /(^|;)\s*display\s*:/i.test(style);
+    if (hasTransformOrClip && !hasDisplay) {
+      errors.push(
+        "An element uses `transform` or `clip-path` without `display: flex` on the same element. Satori requires it there — without it, this throws \"more than one child node\" regardless of how many children the element actually has. Add `display:flex` to that element.",
+      );
+      break;
+    }
+  }
+
   const known = new Set(FONT_FAMILIES.map((f) => f.toLowerCase()));
   const fonts = new Set<string>();
   for (const match of markup.matchAll(/font-family\s*:\s*([^;"']+)/gi)) {
