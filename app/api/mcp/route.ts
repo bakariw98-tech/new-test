@@ -7,7 +7,12 @@ import { blobConfigured, selfDescribingUrl, uploadToBlob } from "../render/store
 import { DRIVE_SETUP_HINT, deleteFromDrive, driveMode, ensureFolderPath, uploadToDrive } from "../render/drive";
 import { closingSlide, listingCard, PRESETS, SAFE_BOTTOM, tourSlide } from "../render/listing";
 import { siteUrl } from "../../../lib/core/context";
-import { listingStore, slugForListing, type ListingRecord } from "../../../lib/store/listings";
+import {
+  listingStore,
+  listingStoreKind,
+  slugForListing,
+  type ListingRecord,
+} from "../../../lib/store/listings";
 
 /**
  * Without a Blob token the store is a per-process Map. That is fine locally and
@@ -16,9 +21,9 @@ import { listingStore, slugForListing, type ListingRecord } from "../../../lib/s
  * someone discover it from a dead link.
  */
 function storageWarning(): string {
-  return blobConfigured()
-    ? ""
-    : "\nWarning: BLOB_READ_WRITE_TOKEN is not set, so this listing is held in memory only and will not survive a restart. Set it before relying on the URL.";
+  return listingStoreKind() === "file"
+    ? "\nNote: no Blob token is configured, so this listing is stored in a local .listings directory. That is fine for development and will not exist on a deployment."
+    : "";
 }
 
 const handler = createMcpHandler(

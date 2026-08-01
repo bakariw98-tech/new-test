@@ -226,14 +226,56 @@ export function createBlobStore(): ListingStore {
 
 /* -------------------------------------------------------------------------- */
 
+export const BLOB_SETUP_HINT = [
+  "No listing storage is configured, so there is nowhere to publish to.",
+  "",
+  "This deployment is serverless: its filesystem is read-only, and anything written",
+  "to /tmp belongs to a single instance, so the next request would not see it.",
+  "",
+  "To fix, in the Vercel dashboard for this project:",
+  "  1. Storage -> Create Database -> Blob",
+  "  2. Connect it to this project (this sets BLOB_READ_WRITE_TOKEN automatically)",
+  "  3. Redeploy",
+  "",
+  "Check it took effect at /api/health, which reports blob.configured.",
+].join("\n");
+
+/**
+ * On a serverless deployment with no Blob token there is no durable place to
+ * write. Failing here with the setup steps beats letting the filesystem throw
+ * EROFS or ENOENT from somewhere deeper, which says nothing about the fix.
+ *
+ * Reads degrade to empty rather than throwing, so a property page renders its
+ * not-found state instead of a 500.
+ */
+function createUnavailableStore(): ListingStore {
+  const refuse = async (): Promise<never> => {
+    throw new Error(BLOB_SETUP_HINT);
+  };
+  return { save: refuse, remove: refuse, async get() { return null; }, async list() { return []; } };
+}
+
+export type StoreKind = "blob" | "file" | "unavailable";
+
+export function listingStoreKind(): StoreKind {
+  if (blobConfigured()) return "blob";
+  // VERCEL is set in every Vercel runtime, local `next dev` included only via
+  // `vercel dev`; a plain dev server has a writable working directory.
+  return process.env.VERCEL ? "unavailable" : "file";
+}
+
 let cached: ListingStore | null = null;
 
-/** Blob when a token is configured, a local file store otherwise. */
+/** Blob when a token is configured, a local file store when one can be written. */
 export function listingStore(): ListingStore {
   if (!cached) {
-    cached = blobConfigured()
-      ? createBlobStore()
-      : createFileStore(`${process.cwd()}/.listings`);
+    const kind = listingStoreKind();
+    cached =
+      kind === "blob"
+        ? createBlobStore()
+        : kind === "file"
+          ? createFileStore(`${process.cwd()}/.listings`)
+          : createUnavailableStore();
   }
   return cached;
 }
