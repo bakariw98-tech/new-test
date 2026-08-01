@@ -19,11 +19,31 @@ import { JWT, OAuth2Client } from "google-auth-library";
  *   My Drive folder fails with "Service Accounts do not have storage quota",
  *   even when the folder is shared with it.
  *
- * Scope is drive.file: the server can create files and manage the ones it
- * created, and can touch nothing else in the account.
+ * Scopes:
+ *
+ * - `drive.file` — create files and manage the ones this app created. Nothing
+ *   else in the account is visible.
+ * - `drive.readonly` — read anything the account can read. This is what makes
+ *   "point at a folder of listing photos" work, because a folder the agent
+ *   filled themselves is invisible under drive.file alone.
+ *
+ * `drive.readonly` is a **restricted** scope. It works immediately for the
+ * project's own owner and its test users, but shipping it to real customers
+ * requires Google's CASA third-party security assessment — an annual cost and a
+ * multi-week review. The narrower alternative is the Google Picker, which grants
+ * per-file access under drive.file and needs no assessment.
+ *
+ * Both scopes are requested together: the server still creates and deletes its
+ * own renders, and additionally reads folders the agent points it at. A token
+ * minted for drive.file alone keeps working for everything except folder reads.
  */
 
-const SCOPE = "https://www.googleapis.com/auth/drive.file";
+const SCOPES = [
+  "https://www.googleapis.com/auth/drive.file",
+  "https://www.googleapis.com/auth/drive.readonly",
+];
+
+const SCOPE = SCOPES.join(" ");
 
 export type DriveUpload = {
   fileId: string;
@@ -143,6 +163,95 @@ export async function ensureFolderPath(path: string, rootId?: string): Promise<s
     parent = (await findFolder(token, segment, parent)) ?? (await createFolder(token, segment, parent));
   }
   return parent;
+}
+
+export type DrivePhoto = {
+  fileId: string;
+  name: string;
+  mimeType: string;
+  width: number | null;
+  height: number | null;
+};
+
+/**
+ * Pulls a folder ID out of whatever the agent pasted — a full Drive URL, a
+ * "shared with me" link, or the bare ID. Anyone copying a folder from Drive gets
+ * a URL, not an ID, and asking them to extract it by hand is the opposite of one
+ * click.
+ */
+export function parseDriveFolderId(input: string): string | null {
+  const value = input.trim();
+  if (!value) return null;
+
+  const patterns = [
+    /\/folders\/([a-zA-Z0-9_-]{10,})/, // .../drive/folders/<id>
+    /\/drive\/u\/\d+\/folders\/([a-zA-Z0-9_-]{10,})/,
+    /[?&]id=([a-zA-Z0-9_-]{10,})/, // ...open?id=<id>
+  ];
+  for (const pattern of patterns) {
+    const match = pattern.exec(value);
+    if (match) return match[1];
+  }
+  // A bare ID, but not a URL we failed to understand.
+  return /^[a-zA-Z0-9_-]{10,}$/.test(value) ? value : null;
+}
+
+/**
+ * Every image in a folder, in the order the agent named them.
+ *
+ * Needs `drive.readonly`: a folder the agent filled themselves was not created
+ * by this app, so `drive.file` cannot see it or anything inside it.
+ *
+ * Sorted by filename rather than by upload time, because listing photos are
+ * conventionally named for their running order (01-exterior, 02-living), and
+ * upload order is whatever the finder happened to do.
+ */
+export async function listFolderImages(folderId: string): Promise<DrivePhoto[]> {
+  const token = await accessToken();
+  const photos: DrivePhoto[] = [];
+  let pageToken: string | undefined;
+
+  do {
+    const params = new URLSearchParams({
+      q: `'${escapeQueryValue(folderId)}' in parents and mimeType contains 'image/' and trashed = false`,
+      fields: "nextPageToken, files(id, name, mimeType, imageMediaMetadata(width, height))",
+      pageSize: "200",
+      orderBy: "name_natural",
+      supportsAllDrives: "true",
+      includeItemsFromAllDrives: "true",
+    });
+    if (pageToken) params.set("pageToken", pageToken);
+
+    const response = await fetch(`https://www.googleapis.com/drive/v3/files?${params}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!response.ok) {
+      throw new Error(explainDriveError(response.status, await response.text()));
+    }
+
+    const body = (await response.json()) as {
+      nextPageToken?: string;
+      files: Array<{
+        id: string;
+        name: string;
+        mimeType: string;
+        imageMediaMetadata?: { width?: number; height?: number };
+      }>;
+    };
+
+    for (const file of body.files) {
+      photos.push({
+        fileId: file.id,
+        name: file.name,
+        mimeType: file.mimeType,
+        width: file.imageMediaMetadata?.width ?? null,
+        height: file.imageMediaMetadata?.height ?? null,
+      });
+    }
+    pageToken = body.nextPageToken;
+  } while (pageToken);
+
+  return photos;
 }
 
 export async function uploadToDrive(params: {
