@@ -43,7 +43,7 @@ export default function UploadPage() {
   }
 
   return (
-    <main>
+    <main className="doc">
       <h1>Upload a photo</h1>
       <p className="tagline">
         Drop an image here to get a URL the renderer can use. The file goes to Drive and stays

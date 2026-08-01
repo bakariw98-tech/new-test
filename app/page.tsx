@@ -19,7 +19,7 @@ export default async function Home() {
   const mcpUrl = `${proto}://${host}/api/mcp`;
 
   return (
-    <main>
+    <main className="doc">
       <h1>hello-world-mcp</h1>
       <p className="tagline">A minimal Model Context Protocol server, running on Vercel.</p>
 

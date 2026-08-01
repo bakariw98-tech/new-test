@@ -11,6 +11,9 @@ next-env.d.ts
 
 .vercel
 
+# Local listing store, used when no Blob token is configured.
+.listings/
+
 .DS_Store
 npm-debug.log*
 yarn-error.log*
