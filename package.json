@@ -22,6 +22,7 @@
     "@remotion/bundler": "^4.0.503",
     "@remotion/cli": "^4.0.503",
     "@remotion/renderer": "^4.0.503",
+    "@remotion/transitions": "4.0.503",
     "@vercel/blob": "^2.6.1",
     "google-auth-library": "^11.0.0",
     "mcp-handler": "^2.0.1",

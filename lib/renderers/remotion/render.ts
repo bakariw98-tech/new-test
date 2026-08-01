@@ -19,6 +19,8 @@ import { readFile, rm } from "node:fs/promises";
 
 export type SlideId = "ListingCard" | "TourSlide" | "ClosingSlide";
 
+export type VideoId = "ListingVideo-9x16" | "ListingVideo-16x9";
+
 let bundlePromise: Promise<string> | null = null;
 
 /**
@@ -86,5 +88,62 @@ export async function renderSlide(params: {
     return copy;
   } finally {
     await rm(path.dirname(output), { recursive: true, force: true });
+  }
+}
+
+/**
+ * Renders the listing video.
+ *
+ * The composition's own `calculateMetadata` derives the duration from the photo
+ * count, so `selectComposition` is what decides how long this runs — not the
+ * caller. That keeps the length rule in one place.
+ *
+ * A 20-second video is 600 frames against a still's one, so this is minutes of
+ * work in the worst case, not seconds. It belongs in a background job, never
+ * inline in a request.
+ */
+export async function renderVideo(params: {
+  id: VideoId;
+  props: Record<string, unknown>;
+  onProgress?: (percent: number) => void;
+}): Promise<{ bytes: Uint8Array; durationInFrames: number; fps: number }> {
+  const { selectComposition, renderMedia } = await import("@remotion/renderer");
+  const serveUrl = await getBundle();
+
+  const composition = await selectComposition({
+    serveUrl,
+    id: params.id,
+    inputProps: params.props,
+  });
+
+  const dir = await import("node:fs/promises").then((fs) =>
+    fs.mkdtemp(path.join(os.tmpdir(), "listing-video-")),
+  );
+  const output = path.join(dir, "video.mp4");
+
+  try {
+    await renderMedia({
+      composition,
+      serveUrl,
+      codec: "h264",
+      outputLocation: output,
+      inputProps: params.props,
+      // 18 is visually lossless for photography; the default trades away detail
+      // in exactly the gradients these scenes are built from.
+      crf: 18,
+      browserExecutable: browserExecutable() ?? undefined,
+      chromiumOptions: { gl: "swangle" },
+      timeoutInMilliseconds: 120_000,
+      onProgress: params.onProgress
+        ? ({ progress }) => params.onProgress?.(Math.round(progress * 100))
+        : undefined,
+    });
+
+    const bytes = await readFile(output);
+    const copy = new Uint8Array(bytes.byteLength);
+    copy.set(bytes);
+    return { bytes: copy, durationInFrames: composition.durationInFrames, fps: composition.fps };
+  } finally {
+    await rm(dir, { recursive: true, force: true });
   }
 }

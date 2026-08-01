@@ -114,3 +114,47 @@ export function planCarousel(context: RenderContext, options?: { captions?: stri
 
   return slides;
 }
+
+/**
+ * The listing video's props, from the same context the carousel uses.
+ *
+ * Sharing `slideTheme` and `formatted` is the point: a video and a carousel for
+ * the same property cannot disagree about its price, because neither of them
+ * formats one.
+ */
+export function planVideo(context: RenderContext): {
+  listing: SlideProps["listing"];
+  brand: SlideProps["brand"];
+  theme: SlideTheme;
+  photos: string[];
+  media: Array<{ url: string; alt?: string }>;
+} {
+  const { brand, formatted, photos } = context;
+
+  const media = photos.map((photo) => ({
+    // Landscape-friendly dimensions: video frames are wider than a 4:5 slide,
+    // and requesting a tall crop here would throw away the sides.
+    url: `${context.urls.site.replace(/\/p\/[^/]*$/, "")}${photoSrc(photo.url, { width: 1920, height: 1080 })}`,
+    alt: photo.alt ?? undefined,
+  }));
+
+  return {
+    listing: {
+      badge: "Just listed",
+      price: formatted.price,
+      address: formatted.address,
+      cityStateZip: formatted.cityStateZip,
+      stats: formatted.stats,
+    },
+    brand: {
+      brokerage: formatted.brandMark,
+      handle: brand.instagram ?? brand.website ?? "",
+      cta: brand.ctaText,
+    },
+    theme: slideTheme(context),
+    // Scenes each override this with their own photo; a non-empty default keeps
+    // the type honest.
+    photos: media.slice(0, 1).map((m) => m.url),
+    media,
+  };
+}
