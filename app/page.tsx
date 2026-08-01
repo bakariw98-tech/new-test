@@ -5,6 +5,11 @@ const TOOLS = [
   ["echo", "Echoes text back verbatim, so you can confirm arguments round-trip."],
   ["server_time", "Current UTC time plus the Vercel region and environment."],
   ["render_image", "Renders HTML markup to a PNG at Instagram or OG sizes."],
+  [
+    "render_listing_carousel",
+    "Builds a full property carousel from listing data and photos, and can deliver it into Google Drive.",
+  ],
+  ["delete_drive_file", "Deletes a Drive file this server created, so a bad render can be replaced."],
 ] as const;
 
 export default async function Home() {
