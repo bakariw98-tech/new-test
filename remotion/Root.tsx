@@ -1,6 +1,9 @@
 import React from "react";
 import { Composition } from "remotion";
+import "./fonts";
 import { ListingCard } from "./slides/ListingCard";
+import { TourSlide } from "./slides/TourSlide";
+import { ClosingSlide } from "./slides/ClosingSlide";
 import { CANVAS, type SlideProps } from "./types";
 
 const sampleProps: SlideProps = {
@@ -40,14 +43,17 @@ const sampleProps: SlideProps = {
  * components and only add a duration and timing hooks — that is the whole
  * reason for adopting Remotion rather than plain Chromium.
  */
+const still = { durationInFrames: 1, fps: 30, width: CANVAS.width, height: CANVAS.height } as const;
+
 export const RemotionRoot: React.FC = () => (
-  <Composition
-    id="ListingCard"
-    component={ListingCard}
-    durationInFrames={1}
-    fps={30}
-    width={CANVAS.width}
-    height={CANVAS.height}
-    defaultProps={sampleProps}
-  />
+  <>
+    <Composition id="ListingCard" component={ListingCard} {...still} defaultProps={sampleProps} />
+    <Composition
+      id="TourSlide"
+      component={TourSlide}
+      {...still}
+      defaultProps={{ ...sampleProps, caption: "A full pool terrace, hedged and lit", index: 2, total: 7 }}
+    />
+    <Composition id="ClosingSlide" component={ClosingSlide} {...still} defaultProps={sampleProps} />
+  </>
 );

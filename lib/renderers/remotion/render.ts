@@ -17,7 +17,7 @@ import path from "node:path";
 import os from "node:os";
 import { readFile, rm } from "node:fs/promises";
 
-export type SlideId = "ListingCard";
+export type SlideId = "ListingCard" | "TourSlide" | "ClosingSlide";
 
 let bundlePromise: Promise<string> | null = null;
 
