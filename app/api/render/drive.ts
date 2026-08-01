@@ -1,4 +1,5 @@
 import { JWT, OAuth2Client } from "google-auth-library";
+import { googleRefreshToken } from "../../../lib/store/credentials";
 
 /**
  * Delivers finished renders straight into Google Drive.
@@ -51,8 +52,15 @@ export type DriveUpload = {
   webViewLink: string;
 };
 
+/**
+ * Which credential path is available. The refresh token is deliberately not
+ * checked here: it can arrive either from the environment or from a Drive
+ * connected at runtime through /api/google/connect, and this has to stay
+ * synchronous for the callers that gate on it. `accessToken()` reports a
+ * missing token with instructions.
+ */
 export function driveMode(): "oauth" | "service-account" | null {
-  if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET && process.env.GOOGLE_REFRESH_TOKEN) {
+  if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
     return "oauth";
   }
   if (process.env.GOOGLE_SERVICE_ACCOUNT_KEY) return "service-account";
@@ -75,7 +83,15 @@ async function accessToken(): Promise<string> {
       clientId: process.env.GOOGLE_CLIENT_ID,
       clientSecret: process.env.GOOGLE_CLIENT_SECRET,
     });
-    client.setCredentials({ refresh_token: process.env.GOOGLE_REFRESH_TOKEN });
+    // A Drive connected through /api/google/connect wins over whatever was set
+    // in the environment, so reconnecting actually takes effect.
+    const refreshToken = await googleRefreshToken();
+    if (!refreshToken) {
+      throw new Error(
+        "No Google account is connected. Visit /api/google/connect to connect one, or set GOOGLE_REFRESH_TOKEN.",
+      );
+    }
+    client.setCredentials({ refresh_token: refreshToken });
     const { token } = await client.getAccessToken();
     if (!token) throw new Error("Google refused to issue an access token for the stored refresh token.");
     return token;

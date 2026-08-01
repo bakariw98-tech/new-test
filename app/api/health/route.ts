@@ -1,6 +1,7 @@
 import { driveMode } from "../render/drive";
 import { blobConfigured } from "../render/store";
 import { listingStoreKind } from "../../../lib/store/listings";
+import { loadGoogleCredential } from "../../../lib/store/credentials";
 
 export const runtime = "nodejs";
 
@@ -27,6 +28,17 @@ export async function GET() {
         commit: process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) ?? "unknown",
         builtAt: process.env.VERCEL_DEPLOYMENT_ID ? undefined : "local",
       },
+      google: await (async () => {
+        const connected = await loadGoogleCredential();
+        return connected
+          ? {
+              connected: true,
+              email: connected.email,
+              connectedAt: connected.connectedAt,
+              canReadFolders: connected.scope.includes("drive.readonly"),
+            }
+          : { connected: false, source: process.env.GOOGLE_REFRESH_TOKEN ? "env" : "none" };
+      })(),
       drive: {
         mode: driveMode() ?? "not configured",
         GOOGLE_CLIENT_ID: describe("GOOGLE_CLIENT_ID"),
