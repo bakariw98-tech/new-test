@@ -1,3 +1,6 @@
+import type { ResolvedTheme } from "../../../lib/core/types";
+import { resolveTheme } from "../../../lib/design/resolve";
+import { themeIdFromLegacyPreset } from "../../../lib/design/tokens";
 import { publicOrigin } from "./store";
 
 /**
@@ -5,65 +8,19 @@ import { publicOrigin } from "./store";
  *
  * These live here rather than in a template an agent has to reproduce, because
  * the rules that make a carousel work are not obvious and are easy to lose:
- * Instagram covers the bottom of every frame, a caption needs a scrim matched to
- * the palette, every slide should carry the brokerage, and the last slide has to
+ * Instagram covers the bottom of every frame, text over a photo needs a panel
+ * behind it, every slide should carry the brokerage, and the last slide has to
  * ask for something. Encoding them means a caller supplies data and gets a
  * correct post, instead of supplying markup and hoping.
+ *
+ * Colours, fonts and sizes are NOT defined here — they come from
+ * `lib/design/tokens.ts`, resolved for the `carousel` medium. This file owns
+ * geometry only. That split is what lets the website and the flyer look like
+ * siblings of these slides rather than cousins.
  */
 
 const CANVAS = { width: 1080, height: 1350 };
 const PHOTO_HEIGHT = 880;
-
-/**
- * The photo does not meet the panel on a flat line — it sweeps into it on a
- * curve, the way a designed social post reads rather than two stacked boxes.
- * The curve is an inline SVG path (Satori renders SVG natively); a thin
- * accent-coloured stroke traces the same sweep.
- *
- * Satori requires `display:flex` on any element using `clip-path` or
- * `transform` — without it its own internal wrapper trips the "more than one
- * child" check. SVG elements do not need it, which is part of why the curve
- * work moved to SVG rather than clip-path.
- */
-
-/** A concave sweep filled with `fill`, spanning `width`, meeting the panel below. */
-function curveSweep(opts: {
-  top: number;
-  width: number;
-  depth: number;
-  fill: string;
-  stroke?: string;
-}): string {
-  const h = opts.depth + 40;
-  // Dips low in the centre, lifts at both edges — one confident arc.
-  const path = `M0 40 C ${opts.width * 0.34} ${40 + opts.depth}, ${opts.width * 0.66} ${40 + opts.depth}, ${opts.width} 40`;
-  const stroke = opts.stroke
-    ? `<path d="${path}" fill="none" stroke="${opts.stroke}" stroke-width="5" opacity="0.9"/>`
-    : "";
-  return `<svg width="${opts.width}" height="${h}" viewBox="0 0 ${opts.width} ${h}" style="position:absolute;left:0;top:${opts.top}px"><path d="${path} L${opts.width} ${h} L0 ${h} Z" fill="${opts.fill}"/>${stroke}</svg>`;
-}
-
-/**
- * The footer's curved top edge rises in the middle and sits CURVE_LIP lower at
- * the left and right edges. Text starts at the left, where the panel is
- * *lowest*, so any content must clear `footerTop + CURVE_LIP` or its first line
- * renders over the photo instead of the panel — unreadable, and invisible until
- * you look at the pixels.
- */
-const CURVE_LIP = 90;
-
-/**
- * A rounded footer panel with a curved top edge, sitting at the bottom of a
- * photo slide to hold a caption or CTA legibly over any image.
- */
-function curvedFooter(opts: { height: number; width: number; fill: string; stroke?: string }): string {
-  const top = CANVAS.height - opts.height;
-  const path = `M0 ${CURVE_LIP} C ${opts.width * 0.32} 0, ${opts.width * 0.68} 0, ${opts.width} ${CURVE_LIP}`;
-  const stroke = opts.stroke
-    ? `<path d="${path}" fill="none" stroke="${opts.stroke}" stroke-width="5" opacity="0.9"/>`
-    : "";
-  return `<svg width="${opts.width}" height="${opts.height}" viewBox="0 0 ${opts.width} ${opts.height}" style="position:absolute;left:0;top:${top}px"><path d="${path} L${opts.width} ${opts.height} L0 ${opts.height} Z" fill="${opts.fill}"/>${stroke}</svg>`;
-}
 
 /**
  * Instagram's UI overlays roughly the bottom 15% (~202px) of a 4:5 frame.
@@ -71,68 +28,47 @@ function curvedFooter(opts: { height: number; width: number; fill: string; strok
  */
 export const SAFE_BOTTOM = 260;
 
+/**
+ * A curved footer's top edge rises in the middle and sits CURVE_LIP lower at
+ * the left and right edges. Text starts at the left, where the panel is
+ * *lowest*, so content must clear `footerTop + CURVE_LIP` or its first line
+ * renders over the photo instead of the panel.
+ */
+const CURVE_LIP = 90;
+
 const NORMALISER_VERSION = 3;
+
+/** Stroke weight for the accent line that traces a seam. */
+const SEAM_STROKE = 5;
 
 export type PresetName = "midnight" | "estate" | "gallery";
 
-type Preset = {
-  accentColor: string;
-  bgColor: string;
-  textColor: string;
-  mutedColor: string;
-  dividerColor: string;
-  bandColor: string;
-  headingFont: string;
-  bodyFont: string;
-  headingWeight: number;
-  scrimFrom: string;
-  scrimTo: string;
-  onPhotoText: string;
-};
+/**
+ * The published preset names, kept because `render://listing-presets` is an MCP
+ * resource external agents already consume. Each maps to a theme; the values
+ * below are projected from the tokens so there is still exactly one place a
+ * colour is defined.
+ */
+function describePreset(name: PresetName) {
+  const theme = carouselTheme(name);
+  return {
+    theme: theme.id,
+    accentColor: theme.color.accent,
+    bgColor: theme.color.bg,
+    textColor: theme.color.ink,
+    mutedColor: theme.color.inkMuted,
+    bandColor: theme.color.surface,
+    headingFont: theme.font.heading,
+    bodyFont: theme.font.body,
+    headingWeight: theme.font.headingWeight,
+    motif: theme.motif,
+  };
+}
 
-export const PRESETS: Record<PresetName, Preset> = {
-  midnight: {
-    accentColor: "#F5B841",
-    bgColor: "#101828",
-    textColor: "#FFFFFF",
-    mutedColor: "#9BA3C0",
-    dividerColor: "#3A4360",
-    bandColor: "#2B3450",
-    headingFont: "Inter",
-    bodyFont: "Inter",
-    headingWeight: 700,
-    scrimFrom: "rgba(16,24,40,0)",
-    scrimTo: "rgba(16,24,40,0.92)",
-    onPhotoText: "#FFFFFF",
-  },
-  estate: {
-    accentColor: "#B08D57",
-    bgColor: "#12100E",
-    textColor: "#F7F3EC",
-    mutedColor: "#A9A096",
-    dividerColor: "#3A342C",
-    bandColor: "#2A241E",
-    headingFont: "Playfair Display",
-    bodyFont: "Inter",
-    headingWeight: 700,
-    scrimFrom: "rgba(18,16,14,0)",
-    scrimTo: "rgba(18,16,14,0.93)",
-    onPhotoText: "#F7F3EC",
-  },
-  gallery: {
-    accentColor: "#1A1A1A",
-    bgColor: "#F4F1EC",
-    textColor: "#1A1A1A",
-    mutedColor: "#6B665F",
-    dividerColor: "#D8D2C8",
-    bandColor: "#E2DCD2",
-    headingFont: "DM Serif Display",
-    bodyFont: "Inter",
-    headingWeight: 400,
-    scrimFrom: "rgba(244,241,236,0)",
-    scrimTo: "rgba(244,241,236,0.97)",
-    onPhotoText: "#1A1A1A",
-  },
+export const PRESETS = {
+  midnight: describePreset("midnight"),
+  estate: describePreset("estate"),
+  gallery: describePreset("gallery"),
 };
 
 export type Listing = {
@@ -151,6 +87,10 @@ export type Brand = {
   contact?: string;
 };
 
+function carouselTheme(preset: PresetName | undefined): ResolvedTheme {
+  return resolveTheme({ themeId: themeIdFromLegacyPreset(preset ?? "gallery"), medium: "carousel" });
+}
+
 /** Route every photo through the normaliser: format conversion plus pre-sizing. */
 function photoUrl(src: string, width: number, height: number): string {
   const origin = publicOrigin();
@@ -168,85 +108,158 @@ function escapeHtml(value: string): string {
     .replace(/"/g, "&quot;");
 }
 
+/*
+ * ---------------------------------------------------------------------------
+ * Seams — how a photo meets a panel. This is the theme's `motif`, and it is the
+ * biggest reason three themes read as three designs rather than three palettes.
+ *
+ * Satori renders inline SVG natively. Unlike `clip-path` it does not require
+ * `display:flex` on the same element, which is an undocumented Satori quirk
+ * that otherwise throws "more than one child node".
+ * ---------------------------------------------------------------------------
+ */
+
+/**
+ * The seam under the listing card's photo. Returns the markup plus the y-offset
+ * where the panel below can safely start drawing text.
+ */
+function cardSeam(theme: ResolvedTheme): { markup: string; panelTop: number } {
+  const w = CANVAS.width;
+
+  if (theme.motif === "curve") {
+    const depth = 150;
+    const h = depth + 40;
+    const top = PHOTO_HEIGHT - 190;
+    const path = `M0 40 C ${w * 0.34} ${40 + depth}, ${w * 0.66} ${40 + depth}, ${w} 40`;
+    return {
+      markup:
+        `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" style="position:absolute;left:0;top:${top}px">` +
+        `<path d="${path} L${w} ${h} L0 ${h} Z" fill="${theme.color.bg}"/>` +
+        `<path d="${path}" fill="none" stroke="${theme.color.accent}" stroke-width="${SEAM_STROKE}" opacity="0.9"/>` +
+        `</svg>`,
+      panelTop: PHOTO_HEIGHT + 20,
+    };
+  }
+
+  if (theme.motif === "rule") {
+    return {
+      markup: `<div style="display:flex;position:absolute;left:0;top:${PHOTO_HEIGHT}px;width:${w}px;height:${SEAM_STROKE}px;background-color:${theme.color.accent}"></div>`,
+      panelTop: PHOTO_HEIGHT + SEAM_STROKE,
+    };
+  }
+
+  return { markup: "", panelTop: PHOTO_HEIGHT };
+}
+
+/**
+ * The panel behind text on a full-bleed photo slide. Returns the markup plus
+ * the lowest y its top edge reaches, which is what content has to clear.
+ */
+function photoFooter(theme: ResolvedTheme, height: number): { markup: string; contentTop: number } {
+  const w = CANVAS.width;
+  const top = CANVAS.height - height;
+
+  if (theme.motif === "curve") {
+    const path = `M0 ${CURVE_LIP} C ${w * 0.32} 0, ${w * 0.68} 0, ${w} ${CURVE_LIP}`;
+    return {
+      markup:
+        `<svg width="${w}" height="${height}" viewBox="0 0 ${w} ${height}" style="position:absolute;left:0;top:${top}px">` +
+        `<path d="${path} L${w} ${height} L0 ${height} Z" fill="${theme.color.bg}"/>` +
+        `<path d="${path}" fill="none" stroke="${theme.color.accent}" stroke-width="${SEAM_STROKE}" opacity="0.9"/>` +
+        `</svg>`,
+      // The curve's lowest point is at the left and right edges, where text starts.
+      contentTop: top + CURVE_LIP,
+    };
+  }
+
+  const rule =
+    theme.motif === "rule"
+      ? `<div style="display:flex;position:absolute;left:0;top:${top}px;width:${w}px;height:${SEAM_STROKE}px;background-color:${theme.color.accent}"></div>`
+      : "";
+  return {
+    markup:
+      `<div style="display:flex;position:absolute;left:0;top:${top}px;width:${w}px;height:${height}px;background-color:${theme.color.bg}"></div>${rule}`,
+    contentTop: top + SEAM_STROKE,
+  };
+}
+
 /** Small brokerage mark for the footer of a photo slide. */
-function brandMark(brand: Brand, colour: string): string {
+function brandMark(brand: Brand, theme: ResolvedTheme): string {
   const label = brand.brokerage ?? brand.handle;
   if (!label) return "";
-  return `<div style="display:flex;margin-top:22px"><div style="display:flex;color:${colour};font-size:26px;font-weight:700;letter-spacing:2px;opacity:0.85">${escapeHtml(label.toUpperCase())}</div></div>`;
+  return `<div style="display:flex;margin-top:${theme.space[3]}px"><div style="display:flex;color:${theme.color.inkMuted};font-size:${theme.size.micro}px;font-weight:700;letter-spacing:2px">${escapeHtml(label.toUpperCase())}</div></div>`;
 }
 
-/** Whether a preset's panel is light (dark text needed) or dark (light text). */
-function footerInk(theme: Preset): string {
-  return theme.textColor;
+/** A pill chip. Filled with the accent, or with the ground when `inverted`. */
+function chip(text: string, theme: ResolvedTheme, position: string, inverted = false): string {
+  const bg = inverted ? theme.color.bg : theme.color.accent;
+  const fg = inverted ? theme.color.accent : theme.color.onAccent;
+  return `<div style="display:flex;position:absolute;${position};background-color:${bg};border-radius:${theme.radius.pill}px;padding:${theme.space[2]}px ${theme.space[5]}px">
+    <div style="display:flex;color:${fg};font-size:${theme.size.caption}px;font-weight:700">${escapeHtml(text)}</div>
+  </div>`;
 }
 
-/** Slide 1: the listing card — photo sweeping on a curve into a data panel. */
+/** Slide 1: the listing card — photo meeting a data panel on the theme's seam. */
 export function listingCard(options: {
   photo?: string;
   listing?: Listing;
   brand?: Brand;
   preset?: PresetName;
 }): string {
-  const theme = PRESETS[options.preset ?? "midnight"];
+  const theme = carouselTheme(options.preset);
   const l = options.listing ?? {};
   const brand = options.brand ?? {};
 
   const photo = options.photo
     ? `<img src="${photoUrl(options.photo, CANVAS.width, PHOTO_HEIGHT)}" style="display:flex;position:absolute;left:0;top:0;width:${CANVAS.width}px;height:${PHOTO_HEIGHT}px;object-fit:cover" />`
-    : `<div style="display:flex;position:absolute;left:0;top:0;width:${CANVAS.width}px;height:${PHOTO_HEIGHT}px;background-color:${theme.bandColor}"></div>`;
+    : `<div style="display:flex;position:absolute;left:0;top:0;width:${CANVAS.width}px;height:${PHOTO_HEIGHT}px;background-color:${theme.color.surface}"></div>`;
 
-  // The curve is painted over the bottom of the photo in the panel colour, with
-  // an accent stroke tracing its top edge.
-  const sweep = curveSweep({
-    top: PHOTO_HEIGHT - 190,
-    width: CANVAS.width,
-    depth: 150,
-    fill: theme.bgColor,
-    stroke: theme.accentColor,
-  });
+  const seam = cardSeam(theme);
 
-  const panel = `<div style="display:flex;flex-direction:column;position:absolute;left:0;top:900px;width:100%;height:450px;padding:24px 64px 56px 64px;justify-content:space-between">
+  // Sq Ft is dropped rather than dashed when absent — an empty column reads as
+  // missing data and makes the whole card look unfinished.
+  const stats: Array<[string, string]> = [
+    ["Beds", l.beds ?? ""],
+    ["Baths", l.baths ?? ""],
+    ["Sq Ft", l.sqft ?? ""],
+  ];
+  const statRow = stats
+    .filter(([, value]) => value !== "")
+    .map(
+      ([label, value]) => `<div style="display:flex;flex-direction:column">
+        <div style="display:flex;color:${theme.color.accent};font-size:${theme.size.h1}px;font-weight:700;font-family:${theme.font.body}">${escapeHtml(value)}</div>
+        <div style="display:flex;color:${theme.color.inkMuted};font-size:${theme.size.micro}px">${label}</div>
+      </div>`,
+    )
+    .join("");
+
+  const panel = `<div style="display:flex;flex-direction:column;position:absolute;left:0;top:${seam.panelTop}px;width:100%;height:${CANVAS.height - seam.panelTop}px;padding:${theme.space[5]}px 64px ${theme.space[6]}px 64px;justify-content:space-between">
     <div style="display:flex;flex-direction:column">
-      <div style="display:flex;color:${theme.textColor};font-size:56px;font-weight:${theme.headingWeight};font-family:${theme.headingFont}">${escapeHtml(l.street ?? "")}</div>
-      <div style="display:flex;color:${theme.mutedColor};font-size:36px;margin-top:12px">${escapeHtml(l.cityState ?? "")}</div>
+      <div style="display:flex;color:${theme.color.ink};font-size:${theme.size.h1}px;font-weight:${theme.font.headingWeight};font-family:${theme.font.heading}">${escapeHtml(l.street ?? "")}</div>
+      <div style="display:flex;color:${theme.color.inkMuted};font-size:${theme.size.body}px;margin-top:${theme.space[1]}px">${escapeHtml(l.cityState ?? "")}</div>
     </div>
-    <div style="display:flex;flex-direction:row;justify-content:space-between">
-      ${["Beds", "Baths", "Sq Ft"]
-        .map(
-          (label, i) =>
-            `<div style="display:flex;flex-direction:column;align-items:flex-start">
-              <div style="display:flex;color:${theme.accentColor};font-size:48px;font-weight:700">${escapeHtml([l.beds, l.baths, l.sqft][i] ?? "—")}</div>
-              <div style="display:flex;color:${theme.mutedColor};font-size:28px">${label}</div>
-            </div>`,
-        )
-        .join("")}
-    </div>
-    <div style="display:flex;flex-direction:row;align-items:center;justify-content:space-between">
-      <div style="display:flex;color:${theme.textColor};font-size:32px;font-weight:700">${escapeHtml(brand.brokerage ?? "")}</div>
-      <div style="display:flex;color:${theme.accentColor};font-size:32px">${escapeHtml(brand.handle ?? "Swipe for tour →")}</div>
+    <div style="display:flex;flex-direction:row;justify-content:space-between">${statRow}</div>
+    <div style="display:flex;flex-direction:row;justify-content:space-between;align-items:center">
+      <div style="display:flex;color:${theme.color.ink};font-size:${theme.size.caption}px;font-weight:700;letter-spacing:1px">${escapeHtml(brand.brokerage ?? "")}</div>
+      <div style="display:flex;color:${theme.color.accent};font-size:${theme.size.caption}px">${escapeHtml(brand.handle ?? "")}</div>
     </div>
   </div>`;
 
-  // Pill-shaped chips — the rounded shape echoes the curve rather than fighting it.
-  const chips = `<div style="display:flex;position:absolute;left:56px;top:56px;background-color:${theme.bgColor};border-radius:9999px;padding:16px 32px">
-    <div style="display:flex;color:${theme.accentColor};font-size:34px;font-weight:700">${escapeHtml(l.badge ?? "JUST LISTED")}</div>
-  </div>
-  <div style="display:flex;position:absolute;right:56px;top:56px;background-color:${theme.accentColor};border-radius:9999px;padding:16px 32px">
-    <div style="display:flex;color:${theme.bgColor};font-size:34px;font-weight:${theme.headingWeight};font-family:${theme.headingFont}">${escapeHtml(l.price ?? "")}</div>
-  </div>`;
+  const chips =
+    chip(l.badge ?? "JUST LISTED", theme, "left:56px;top:56px", true) +
+    chip(l.price ?? "", theme, "right:56px;top:56px");
 
-  return `<div style="display:flex;flex-direction:column;width:100%;height:100%;background-color:${theme.bgColor};position:relative;font-family:${theme.bodyFont}">
+  return `<div style="display:flex;flex-direction:column;width:100%;height:100%;background-color:${theme.color.bg};position:relative;font-family:${theme.font.body}">
   ${photo}
-  ${sweep}
+  ${seam.markup}
   ${panel}
   ${chips}
 </div>`;
 }
 
 /**
- * Middle slides: full-bleed photo with a curved footer panel holding the
- * caption. The curved top edge is the same signature as the card's sweep, so
- * the set reads as one designed system.
+ * Middle slides: full-bleed photo with a panel holding the caption. The panel's
+ * top edge is the same seam as the card's, so the set reads as one system.
  */
 export function tourSlide(options: {
   photo: string;
@@ -256,43 +269,34 @@ export function tourSlide(options: {
   brand?: Brand;
   preset?: PresetName;
 }): string {
-  const theme = PRESETS[options.preset ?? "midnight"];
+  const theme = carouselTheme(options.preset);
   const brand = options.brand ?? {};
 
   const counter =
     options.index && options.total
-      ? `<div style="display:flex;position:absolute;left:56px;top:56px;background-color:${theme.bgColor};border-radius:9999px;padding:14px 28px">
-           <div style="display:flex;color:${theme.accentColor};font-size:30px;font-weight:700">${options.index} / ${options.total}</div>
-         </div>`
+      ? chip(`${options.index} / ${options.total}`, theme, "left:56px;top:56px", true)
       : "";
 
-  // Deep enough that a two-line caption still starts below the curve's lip at
-  // the left edge (footer top 770 + lip 90 = 860; a two-line caption bottomed at
-  // SAFE_BOTTOM starts around 913).
-  const footerHeight = 580;
-  const footer = curvedFooter({
-    height: footerHeight,
-    width: CANVAS.width,
-    fill: theme.bgColor,
-    stroke: theme.accentColor,
-  });
+  // Deep enough that a two-line caption still starts below the seam. See the
+  // assertion in listing.test.ts, which fails if this stops being true.
+  const footer = photoFooter(theme, 620);
 
-  const footerContent = `<div style="display:flex;flex-direction:column;position:absolute;left:0;bottom:${SAFE_BOTTOM}px;width:${CANVAS.width}px;padding:0 64px">
-    ${options.caption ? `<div style="display:flex;color:${footerInk(theme)};font-size:56px;font-weight:${theme.headingWeight};font-family:${theme.headingFont};line-height:1.15">${escapeHtml(options.caption)}</div>` : ""}
-    ${brandMark(brand, theme.mutedColor)}
+  const content = `<div style="display:flex;flex-direction:column;position:absolute;left:0;bottom:${SAFE_BOTTOM}px;width:${CANVAS.width}px;padding:0 64px">
+    ${options.caption ? `<div style="display:flex;color:${theme.color.ink};font-size:${theme.size.h1}px;font-weight:${theme.font.headingWeight};font-family:${theme.font.heading};line-height:1.15">${escapeHtml(options.caption)}</div>` : ""}
+    ${brandMark(brand, theme)}
   </div>`;
 
-  return `<div style="display:flex;position:relative;width:100%;height:100%;background-color:${theme.bgColor};font-family:${theme.bodyFont}">
+  return `<div style="display:flex;position:relative;width:100%;height:100%;background-color:${theme.color.bg};font-family:${theme.font.body}">
   <img src="${photoUrl(options.photo, CANVAS.width, CANVAS.height)}" style="position:absolute;left:0;top:0;width:${CANVAS.width}px;height:${CANVAS.height}px;object-fit:cover" />
-  ${footer}
+  ${footer.markup}
   ${counter}
-  ${footerContent}
+  ${content}
 </div>`;
 }
 
 /**
- * Final slide: the ask. Always renders a contact block over a curved footer —
- * the whole post exists to produce this one action.
+ * Final slide: the ask. Always renders a contact block — the whole post exists
+ * to produce this one action.
  */
 export function closingSlide(options: {
   photo?: string;
@@ -301,44 +305,40 @@ export function closingSlide(options: {
   brand?: Brand;
   preset?: PresetName;
 }): string {
-  const theme = PRESETS[options.preset ?? "midnight"];
+  const theme = carouselTheme(options.preset);
   const brand = options.brand ?? {};
   const l = options.listing ?? {};
 
   const background = options.photo
     ? `<img src="${photoUrl(options.photo, CANVAS.width, CANVAS.height)}" style="position:absolute;left:0;top:0;width:${CANVAS.width}px;height:${CANVAS.height}px;object-fit:cover" />`
-    : `<div style="display:flex;position:absolute;left:0;top:0;width:${CANVAS.width}px;height:${CANVAS.height}px;background-color:${theme.bgColor}"></div>`;
+    : `<div style="display:flex;position:absolute;left:0;top:0;width:${CANVAS.width}px;height:${CANVAS.height}px;background-color:${theme.color.surface}"></div>`;
 
-  // Taller than the tour footer because this slide stacks four elements —
-  // headline, address, CTA pill, brand mark (~276px). Bottomed at SAFE_BOTTOM
-  // that starts around 814, clearing the curve's lip at 740.
-  const footerHeight = 700;
-  const footer = curvedFooter({
-    height: footerHeight,
-    width: CANVAS.width,
-    fill: theme.bgColor,
-    stroke: theme.accentColor,
-  });
+  // Taller than the tour footer: this slide stacks headline, address, CTA pill
+  // and brand mark.
+  const footer = photoFooter(theme, 700);
 
   const contactLine = brand.contact ?? brand.handle ?? "";
   const contact = contactLine
-    ? `<div style="display:flex;align-self:flex-start;background-color:${theme.accentColor};border-radius:9999px;padding:22px 44px;margin-top:32px">
-         <div style="display:flex;color:${theme.bgColor};font-size:34px;font-weight:700">${escapeHtml(contactLine)}</div>
+    ? `<div style="display:flex;align-self:flex-start;background-color:${theme.color.accent};border-radius:${theme.radius.pill}px;padding:${theme.space[3]}px ${theme.space[6]}px;margin-top:${theme.space[3]}px">
+         <div style="display:flex;color:${theme.color.onAccent};font-size:${theme.size.caption}px;font-weight:700">${escapeHtml(contactLine)}</div>
        </div>`
     : "";
 
   const address = [l.street, l.cityState].filter(Boolean).join(" · ");
 
-  const footerContent = `<div style="display:flex;flex-direction:column;position:absolute;left:0;bottom:${SAFE_BOTTOM}px;width:${CANVAS.width}px;padding:0 64px">
-    <div style="display:flex;color:${theme.textColor};font-size:64px;font-weight:${theme.headingWeight};font-family:${theme.headingFont};line-height:1.12">${escapeHtml(options.headline ?? "Book a private showing")}</div>
-    ${address ? `<div style="display:flex;color:${theme.mutedColor};font-size:30px;margin-top:16px">${escapeHtml(address)}</div>` : ""}
+  const content = `<div style="display:flex;flex-direction:column;position:absolute;left:0;bottom:${SAFE_BOTTOM}px;width:${CANVAS.width}px;padding:0 64px">
+    <div style="display:flex;color:${theme.color.ink};font-size:${theme.size.h1}px;font-weight:${theme.font.headingWeight};font-family:${theme.font.heading};line-height:1.12">${escapeHtml(options.headline ?? "Book a private showing")}</div>
+    ${address ? `<div style="display:flex;color:${theme.color.inkMuted};font-size:${theme.size.caption}px;margin-top:${theme.space[2]}px">${escapeHtml(address)}</div>` : ""}
     ${contact}
-    ${brandMark(brand, theme.mutedColor)}
+    ${brandMark(brand, theme)}
   </div>`;
 
-  return `<div style="display:flex;position:relative;width:100%;height:100%;background-color:${theme.bgColor};font-family:${theme.bodyFont}">
+  return `<div style="display:flex;position:relative;width:100%;height:100%;background-color:${theme.color.bg};font-family:${theme.font.body}">
   ${background}
-  ${footer}
-  ${footerContent}
+  ${footer.markup}
+  ${content}
 </div>`;
 }
+
+/** Exposed for the layout tests, which assert content clears the seam. */
+export const __geometry = { CANVAS, PHOTO_HEIGHT, CURVE_LIP, cardSeam, photoFooter, carouselTheme };
