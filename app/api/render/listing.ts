@@ -12,29 +12,57 @@ import { publicOrigin } from "./store";
  */
 
 const CANVAS = { width: 1080, height: 1350 };
-const BAND_HEIGHT = 800;
-const PANEL_HEIGHT = CANVAS.height - BAND_HEIGHT;
+const PHOTO_HEIGHT = 880;
 
 /**
- * The listing card's photo meets its data panel on a diagonal, not a flat line —
- * the shape that makes the layout read as designed rather than stacked boxes.
- * A thin accent-coloured seam runs parallel to the cut, offset below it.
+ * The photo does not meet the panel on a flat line — it sweeps into it on a
+ * curve, the way a designed social post reads rather than two stacked boxes.
+ * The curve is an inline SVG path (Satori renders SVG natively); a thin
+ * accent-coloured stroke traces the same sweep.
  *
- * DIAGONAL_DROP is how much lower the cut sits on the left than the right.
  * Satori requires `display:flex` on any element using `clip-path` or
- * `transform` — without it, Satori's own internal wrapper trips the
- * "more than one child" check, which is not documented anywhere and reads as
- * a markup error when it is really a Satori quirk.
+ * `transform` — without it its own internal wrapper trips the "more than one
+ * child" check. SVG elements do not need it, which is part of why the curve
+ * work moved to SVG rather than clip-path.
  */
-const DIAGONAL_DROP = 84;
-const SEAM_THICKNESS = 10;
 
-/** A straight cut from bottom-left (deep) to a shallower top-right, as a clip-path. */
-function diagonalClip(rightY: number, leftY: number): { clipPath: string; boxHeight: number } {
-  return {
-    clipPath: `polygon(0 0, 100% 0, 100% ${((rightY / leftY) * 100).toFixed(3)}%, 0 100%)`,
-    boxHeight: leftY,
-  };
+/** A concave sweep filled with `fill`, spanning `width`, meeting the panel below. */
+function curveSweep(opts: {
+  top: number;
+  width: number;
+  depth: number;
+  fill: string;
+  stroke?: string;
+}): string {
+  const h = opts.depth + 40;
+  // Dips low in the centre, lifts at both edges — one confident arc.
+  const path = `M0 40 C ${opts.width * 0.34} ${40 + opts.depth}, ${opts.width * 0.66} ${40 + opts.depth}, ${opts.width} 40`;
+  const stroke = opts.stroke
+    ? `<path d="${path}" fill="none" stroke="${opts.stroke}" stroke-width="5" opacity="0.9"/>`
+    : "";
+  return `<svg width="${opts.width}" height="${h}" viewBox="0 0 ${opts.width} ${h}" style="position:absolute;left:0;top:${opts.top}px"><path d="${path} L${opts.width} ${h} L0 ${h} Z" fill="${opts.fill}"/>${stroke}</svg>`;
+}
+
+/**
+ * The footer's curved top edge rises in the middle and sits CURVE_LIP lower at
+ * the left and right edges. Text starts at the left, where the panel is
+ * *lowest*, so any content must clear `footerTop + CURVE_LIP` or its first line
+ * renders over the photo instead of the panel — unreadable, and invisible until
+ * you look at the pixels.
+ */
+const CURVE_LIP = 90;
+
+/**
+ * A rounded footer panel with a curved top edge, sitting at the bottom of a
+ * photo slide to hold a caption or CTA legibly over any image.
+ */
+function curvedFooter(opts: { height: number; width: number; fill: string; stroke?: string }): string {
+  const top = CANVAS.height - opts.height;
+  const path = `M0 ${CURVE_LIP} C ${opts.width * 0.32} 0, ${opts.width * 0.68} 0, ${opts.width} ${CURVE_LIP}`;
+  const stroke = opts.stroke
+    ? `<path d="${path}" fill="none" stroke="${opts.stroke}" stroke-width="5" opacity="0.9"/>`
+    : "";
+  return `<svg width="${opts.width}" height="${opts.height}" viewBox="0 0 ${opts.width} ${opts.height}" style="position:absolute;left:0;top:${top}px"><path d="${path} L${opts.width} ${opts.height} L0 ${opts.height} Z" fill="${opts.fill}"/>${stroke}</svg>`;
 }
 
 /**
@@ -140,27 +168,19 @@ function escapeHtml(value: string): string {
     .replace(/"/g, "&quot;");
 }
 
-/**
- * A small diagonal accent ribbon in the top-right corner — the same geometric
- * signature as the listing card's cut, repeated small, so the photo-only slides
- * still read as part of one designed system rather than a plain photo dump.
- */
-function cornerRibbon(theme: Preset): string {
-  return `<div style="display:flex;position:absolute;right:0;top:0;width:170px;height:170px;background-color:${theme.accentColor};clip-path:polygon(100% 0, 100% 100%, 0 0);opacity:0.92"></div>`;
-}
-
-/** Small brokerage mark, carried on every slide so a screenshot stays attributed. */
-function brandMark(brand: Brand, theme: Preset, onPhoto: boolean): string {
+/** Small brokerage mark for the footer of a photo slide. */
+function brandMark(brand: Brand, colour: string): string {
   const label = brand.brokerage ?? brand.handle;
   if (!label) return "";
-
-  const colour = onPhoto ? theme.onPhotoText : theme.textColor;
-  return `<div style="display:flex;position:absolute;left:64px;bottom:${SAFE_BOTTOM - 96}px">
-    <div style="display:flex;color:${colour};font-size:26px;font-weight:700;letter-spacing:2px;opacity:0.85">${escapeHtml(label.toUpperCase())}</div>
-  </div>`;
+  return `<div style="display:flex;margin-top:22px"><div style="display:flex;color:${colour};font-size:26px;font-weight:700;letter-spacing:2px;opacity:0.85">${escapeHtml(label.toUpperCase())}</div></div>`;
 }
 
-/** Slide 1: the listing card — photo band over a data panel. */
+/** Whether a preset's panel is light (dark text needed) or dark (light text). */
+function footerInk(theme: Preset): string {
+  return theme.textColor;
+}
+
+/** Slide 1: the listing card — photo sweeping on a curve into a data panel. */
 export function listingCard(options: {
   photo?: string;
   listing?: Listing;
@@ -171,18 +191,25 @@ export function listingCard(options: {
   const l = options.listing ?? {};
   const brand = options.brand ?? {};
 
-  const seam = diagonalClip(BAND_HEIGHT + SEAM_THICKNESS, BAND_HEIGHT + DIAGONAL_DROP + SEAM_THICKNESS);
-  const cut = diagonalClip(BAND_HEIGHT, BAND_HEIGHT + DIAGONAL_DROP);
+  const photo = options.photo
+    ? `<img src="${photoUrl(options.photo, CANVAS.width, PHOTO_HEIGHT)}" style="display:flex;position:absolute;left:0;top:0;width:${CANVAS.width}px;height:${PHOTO_HEIGHT}px;object-fit:cover" />`
+    : `<div style="display:flex;position:absolute;left:0;top:0;width:${CANVAS.width}px;height:${PHOTO_HEIGHT}px;background-color:${theme.bandColor}"></div>`;
 
-  // Panel first (bottom of the stack), then the seam, then the photo — each
-  // painted over the last so the diagonal edge shows as a cut through the panel
-  // rather than being hidden behind its flat top edge.
-  const panel = `<div style="display:flex;flex-direction:column;position:absolute;left:0;top:${BAND_HEIGHT}px;width:100%;height:${PANEL_HEIGHT}px;background-color:${theme.bgColor};padding:${56 + DIAGONAL_DROP}px 64px 56px 64px;justify-content:space-between">
+  // The curve is painted over the bottom of the photo in the panel colour, with
+  // an accent stroke tracing its top edge.
+  const sweep = curveSweep({
+    top: PHOTO_HEIGHT - 190,
+    width: CANVAS.width,
+    depth: 150,
+    fill: theme.bgColor,
+    stroke: theme.accentColor,
+  });
+
+  const panel = `<div style="display:flex;flex-direction:column;position:absolute;left:0;top:900px;width:100%;height:450px;padding:24px 64px 56px 64px;justify-content:space-between">
     <div style="display:flex;flex-direction:column">
       <div style="display:flex;color:${theme.textColor};font-size:56px;font-weight:${theme.headingWeight};font-family:${theme.headingFont}">${escapeHtml(l.street ?? "")}</div>
       <div style="display:flex;color:${theme.mutedColor};font-size:36px;margin-top:12px">${escapeHtml(l.cityState ?? "")}</div>
     </div>
-    <div style="display:flex;width:100%;height:2px;background-color:${theme.dividerColor}"></div>
     <div style="display:flex;flex-direction:row;justify-content:space-between">
       ${["Beds", "Baths", "Sq Ft"]
         .map(
@@ -200,29 +227,27 @@ export function listingCard(options: {
     </div>
   </div>`;
 
-  const seamDiv = `<div style="display:flex;position:absolute;left:0;top:0;width:${CANVAS.width}px;height:${seam.boxHeight}px;background-color:${theme.accentColor};clip-path:${seam.clipPath}"></div>`;
-
-  const band = options.photo
-    ? `<img src="${photoUrl(options.photo, CANVAS.width, BAND_HEIGHT + DIAGONAL_DROP)}" style="display:flex;position:absolute;left:0;top:0;width:${CANVAS.width}px;height:${cut.boxHeight}px;object-fit:cover;clip-path:${cut.clipPath}" />
-       <div style="display:flex;position:absolute;left:0;top:0;width:${CANVAS.width}px;height:${cut.boxHeight}px;clip-path:${cut.clipPath};background:linear-gradient(180deg,rgba(0,0,0,0.42) 0%,rgba(0,0,0,0.04) 34%,rgba(0,0,0,0.12) 100%)"></div>`
-    : `<div style="display:flex;position:absolute;left:0;top:0;width:${CANVAS.width}px;height:${cut.boxHeight}px;background-color:${theme.bandColor};clip-path:${cut.clipPath}"></div>`;
-
-  const chips = `<div style="display:flex;position:absolute;left:56px;top:56px;background-color:${theme.accentColor};border-radius:10px;padding:16px 28px;transform:rotate(-3deg)">
-    <div style="display:flex;color:${theme.bgColor};font-size:34px;font-weight:700">${escapeHtml(l.badge ?? "JUST LISTED")}</div>
+  // Pill-shaped chips — the rounded shape echoes the curve rather than fighting it.
+  const chips = `<div style="display:flex;position:absolute;left:56px;top:56px;background-color:${theme.bgColor};border-radius:9999px;padding:16px 32px">
+    <div style="display:flex;color:${theme.accentColor};font-size:34px;font-weight:700">${escapeHtml(l.badge ?? "JUST LISTED")}</div>
   </div>
-  <div style="display:flex;position:absolute;right:56px;top:56px;background-color:${theme.bgColor};border-radius:12px;padding:16px 28px">
-    <div style="display:flex;color:${theme.accentColor};font-size:34px;font-weight:${theme.headingWeight};font-family:${theme.headingFont}">${escapeHtml(l.price ?? "")}</div>
+  <div style="display:flex;position:absolute;right:56px;top:56px;background-color:${theme.accentColor};border-radius:9999px;padding:16px 32px">
+    <div style="display:flex;color:${theme.bgColor};font-size:34px;font-weight:${theme.headingWeight};font-family:${theme.headingFont}">${escapeHtml(l.price ?? "")}</div>
   </div>`;
 
   return `<div style="display:flex;flex-direction:column;width:100%;height:100%;background-color:${theme.bgColor};position:relative;font-family:${theme.bodyFont}">
+  ${photo}
+  ${sweep}
   ${panel}
-  ${seamDiv}
-  ${band}
   ${chips}
 </div>`;
 }
 
-/** Middle slides: a photo, a caption above the safe zone, the brokerage mark. */
+/**
+ * Middle slides: full-bleed photo with a curved footer panel holding the
+ * caption. The curved top edge is the same signature as the card's sweep, so
+ * the set reads as one designed system.
+ */
 export function tourSlide(options: {
   photo: string;
   caption?: string;
@@ -236,33 +261,38 @@ export function tourSlide(options: {
 
   const counter =
     options.index && options.total
-      ? `<div style="display:flex;position:absolute;left:56px;top:56px;background-color:${theme.bgColor};border-radius:12px;padding:14px 24px;transform:rotate(-3deg)">
+      ? `<div style="display:flex;position:absolute;left:56px;top:56px;background-color:${theme.bgColor};border-radius:9999px;padding:14px 28px">
            <div style="display:flex;color:${theme.accentColor};font-size:30px;font-weight:700">${options.index} / ${options.total}</div>
          </div>`
       : "";
 
-  const caption = options.caption
-    ? `<div style="display:flex;flex-direction:column;position:absolute;left:0;bottom:${SAFE_BOTTOM}px;width:${CANVAS.width}px;padding:0 64px">
-         <div style="display:flex;color:${theme.onPhotoText};font-size:60px;font-weight:${theme.headingWeight};font-family:${theme.headingFont};line-height:1.15">${escapeHtml(options.caption)}</div>
-       </div>`
-    : "";
+  // Deep enough that a two-line caption still starts below the curve's lip at
+  // the left edge (footer top 770 + lip 90 = 860; a two-line caption bottomed at
+  // SAFE_BOTTOM starts around 913).
+  const footerHeight = 580;
+  const footer = curvedFooter({
+    height: footerHeight,
+    width: CANVAS.width,
+    fill: theme.bgColor,
+    stroke: theme.accentColor,
+  });
+
+  const footerContent = `<div style="display:flex;flex-direction:column;position:absolute;left:0;bottom:${SAFE_BOTTOM}px;width:${CANVAS.width}px;padding:0 64px">
+    ${options.caption ? `<div style="display:flex;color:${footerInk(theme)};font-size:56px;font-weight:${theme.headingWeight};font-family:${theme.headingFont};line-height:1.15">${escapeHtml(options.caption)}</div>` : ""}
+    ${brandMark(brand, theme.mutedColor)}
+  </div>`;
 
   return `<div style="display:flex;position:relative;width:100%;height:100%;background-color:${theme.bgColor};font-family:${theme.bodyFont}">
   <img src="${photoUrl(options.photo, CANVAS.width, CANVAS.height)}" style="position:absolute;left:0;top:0;width:${CANVAS.width}px;height:${CANVAS.height}px;object-fit:cover" />
-  <div style="display:flex;position:absolute;left:0;top:0;width:${CANVAS.width}px;height:${CANVAS.height}px;background:linear-gradient(180deg,${theme.scrimFrom} 0%,${theme.scrimFrom} 42%,${theme.scrimTo} 100%)"></div>
-  ${cornerRibbon(theme)}
+  ${footer}
   ${counter}
-  ${caption}
-  ${brandMark(brand, theme, true)}
+  ${footerContent}
 </div>`;
 }
 
 /**
- * Final slide: the ask.
- *
- * A carousel that ends without a way to respond wastes the attention it just
- * earned, so this always renders a contact block — the whole post exists to
- * produce this one action.
+ * Final slide: the ask. Always renders a contact block over a curved footer —
+ * the whole post exists to produce this one action.
  */
 export function closingSlide(options: {
   photo?: string;
@@ -276,27 +306,39 @@ export function closingSlide(options: {
   const l = options.listing ?? {};
 
   const background = options.photo
-    ? `<img src="${photoUrl(options.photo, CANVAS.width, CANVAS.height)}" style="position:absolute;left:0;top:0;width:${CANVAS.width}px;height:${CANVAS.height}px;object-fit:cover" />
-       <div style="display:flex;position:absolute;left:0;top:0;width:${CANVAS.width}px;height:${CANVAS.height}px;background:linear-gradient(180deg,${theme.scrimFrom} 0%,${theme.scrimTo} 62%,${theme.scrimTo} 100%)"></div>`
+    ? `<img src="${photoUrl(options.photo, CANVAS.width, CANVAS.height)}" style="position:absolute;left:0;top:0;width:${CANVAS.width}px;height:${CANVAS.height}px;object-fit:cover" />`
     : `<div style="display:flex;position:absolute;left:0;top:0;width:${CANVAS.width}px;height:${CANVAS.height}px;background-color:${theme.bgColor}"></div>`;
+
+  // Taller than the tour footer because this slide stacks four elements —
+  // headline, address, CTA pill, brand mark (~276px). Bottomed at SAFE_BOTTOM
+  // that starts around 814, clearing the curve's lip at 740.
+  const footerHeight = 700;
+  const footer = curvedFooter({
+    height: footerHeight,
+    width: CANVAS.width,
+    fill: theme.bgColor,
+    stroke: theme.accentColor,
+  });
 
   const contactLine = brand.contact ?? brand.handle ?? "";
   const contact = contactLine
-    ? `<div style="display:flex;align-self:flex-start;background-color:${theme.accentColor};border-radius:9999px;padding:22px 40px;margin-top:36px">
+    ? `<div style="display:flex;align-self:flex-start;background-color:${theme.accentColor};border-radius:9999px;padding:22px 44px;margin-top:32px">
          <div style="display:flex;color:${theme.bgColor};font-size:34px;font-weight:700">${escapeHtml(contactLine)}</div>
        </div>`
     : "";
 
   const address = [l.street, l.cityState].filter(Boolean).join(" · ");
 
+  const footerContent = `<div style="display:flex;flex-direction:column;position:absolute;left:0;bottom:${SAFE_BOTTOM}px;width:${CANVAS.width}px;padding:0 64px">
+    <div style="display:flex;color:${theme.textColor};font-size:64px;font-weight:${theme.headingWeight};font-family:${theme.headingFont};line-height:1.12">${escapeHtml(options.headline ?? "Book a private showing")}</div>
+    ${address ? `<div style="display:flex;color:${theme.mutedColor};font-size:30px;margin-top:16px">${escapeHtml(address)}</div>` : ""}
+    ${contact}
+    ${brandMark(brand, theme.mutedColor)}
+  </div>`;
+
   return `<div style="display:flex;position:relative;width:100%;height:100%;background-color:${theme.bgColor};font-family:${theme.bodyFont}">
   ${background}
-  ${cornerRibbon(theme)}
-  <div style="display:flex;flex-direction:column;position:absolute;left:0;bottom:${SAFE_BOTTOM}px;width:${CANVAS.width}px;padding:0 64px">
-    <div style="display:flex;color:${theme.onPhotoText};font-size:64px;font-weight:${theme.headingWeight};font-family:${theme.headingFont};line-height:1.12">${escapeHtml(options.headline ?? "Book a private showing")}</div>
-    ${address ? `<div style="display:flex;color:${theme.onPhotoText};font-size:30px;margin-top:18px;opacity:0.8">${escapeHtml(address)}</div>` : ""}
-    ${contact}
-  </div>
-  ${brandMark(brand, theme, true)}
+  ${footer}
+  ${footerContent}
 </div>`;
 }
