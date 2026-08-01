@@ -8,6 +8,13 @@ const nextConfig: NextConfig = {
     "/api/render": ["./node_modules/@fontsource/*/files/*-latin-*-normal.woff"],
     "/api/mcp": ["./node_modules/@fontsource/*/files/*-latin-*-normal.woff"],
   },
+
+  // Remotion's renderer picks its native compositor by platform at runtime.
+  // Bundling it makes webpack try to resolve every platform's binary at build
+  // time, including Windows, and the build fails on a package that will never
+  // be installed. Left external, the require happens at runtime on the one
+  // platform that matters.
+  serverExternalPackages: ["@remotion/renderer", "@remotion/bundler", "@remotion/compositor-linux-x64-gnu"],
 };
 
 export default nextConfig;

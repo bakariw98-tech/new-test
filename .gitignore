@@ -13,6 +13,8 @@ next-env.d.ts
 
 # Local listing store, used when no Blob token is configured.
 .listings/
+.jobs/
+.renders/
 
 .DS_Store
 npm-debug.log*
