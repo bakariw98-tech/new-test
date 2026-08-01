@@ -4,7 +4,15 @@ import { renderToPng, SIZES } from "../render/render";
 import { EXAMPLES, GUIDE, RULES_SUMMARY } from "../render/docs";
 import { checkImageSources, explainRenderError, lintMarkup } from "../render/lint";
 import { blobConfigured, selfDescribingUrl, uploadToBlob } from "../render/store";
-import { DRIVE_SETUP_HINT, deleteFromDrive, driveMode, ensureFolderPath, uploadToDrive } from "../render/drive";
+import {
+  DRIVE_SETUP_HINT,
+  deleteFromDrive,
+  driveMode,
+  ensureFolderPath,
+  listFolderImages,
+  parseDriveFolderId,
+  uploadToDrive,
+} from "../render/drive";
 import { closingSlide, listingCard, PRESETS, SAFE_BOTTOM, tourSlide } from "../render/listing";
 import { siteUrl } from "../../../lib/core/context";
 import {
@@ -562,6 +570,13 @@ const handler = createMcpHandler(
               .describe('Short phrases: "Chef\'s kitchen", "Guest house", "Pool".'),
             mlsId: z.string().max(60).nullable().default(null),
           }),
+          driveFolder: z
+            .string()
+            .max(500)
+            .optional()
+            .describe(
+              "Drive folder URL, share link, or ID holding the listing photos. Every image in it is used, in filename order, and the first becomes the hero. Use this instead of photos[] — it is the one-click path.",
+            ),
           photos: z
             .array(
               z.object({
@@ -570,8 +585,9 @@ const handler = createMcpHandler(
                 role: z.enum(["hero", "gallery"]).default("gallery"),
               }),
             )
-            .min(1)
-            .max(40),
+            .max(40)
+            .optional()
+            .describe("Explicit photo list. Omit when driveFolder is given."),
           brand: z.object({
             agentName: z.string().min(1).max(120),
             agentTitle: z.string().max(120).nullable().default(null),
@@ -596,8 +612,48 @@ const handler = createMcpHandler(
           }),
         }),
       },
-      async ({ slug, theme, listing, photos, brand }) => {
+      async ({ slug, theme, listing, driveFolder, photos: explicitPhotos, brand }) => {
         try {
+          // A folder is the one-click path; an explicit list is the escape hatch.
+          let photos = explicitPhotos ?? [];
+          if (driveFolder) {
+            if (!driveMode()) {
+              return { content: [{ type: "text", text: DRIVE_SETUP_HINT }], isError: true };
+            }
+            const folderId = parseDriveFolderId(driveFolder);
+            if (!folderId) {
+              return {
+                content: [
+                  {
+                    type: "text",
+                    text: `Could not find a folder ID in "${driveFolder}". Paste the folder's Drive URL or its ID.`,
+                  },
+                ],
+                isError: true,
+              };
+            }
+            const found = await listFolderImages(folderId);
+            photos = found.map((photo, index) => ({
+              url: photo.fileId,
+              alt: undefined,
+              role: index === 0 ? ("hero" as const) : ("gallery" as const),
+            }));
+          }
+
+          if (photos.length === 0) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: driveFolder
+                    ? "That Drive folder has no images in it. Check it is the folder holding the photos rather than its parent."
+                    : "No photos given. Pass driveFolder to pull them from a Drive folder, or photos[] to list them explicitly.",
+                },
+              ],
+              isError: true,
+            };
+          }
+
           const store = listingStore();
           const resolvedSlug = await slugForListing(store, listing, slug);
           const existing = await store.get(resolvedSlug);
@@ -690,6 +746,87 @@ const handler = createMcpHandler(
               {
                 type: "text",
                 text: `Could not publish the listing: ${error instanceof Error ? error.message : String(error)}`,
+              },
+            ],
+            isError: true,
+          };
+        }
+      },
+    );
+
+    server.registerTool(
+      "list_drive_photos",
+      {
+        title: "List Photos In A Drive Folder",
+        description: [
+          "Every image in a Google Drive folder, in filename order, ready to hand to",
+          "create_listing.",
+          "",
+          "Paste whatever the agent copied — the folder URL from Drive's address bar, a share",
+          "link, or the bare folder ID. All three work.",
+          "",
+          "Listing photos are conventionally named for their running order (01-exterior,",
+          "02-living), so filename order is the running order. Upload order is not.",
+        ].join("\n"),
+        annotations: { readOnlyHint: true, openWorldHint: false },
+        inputSchema: z.object({
+          folder: z
+            .string()
+            .min(1)
+            .max(500)
+            .describe("Drive folder URL, share link, or folder ID."),
+        }),
+      },
+      async ({ folder }) => {
+        if (!driveMode()) {
+          return { content: [{ type: "text", text: DRIVE_SETUP_HINT }], isError: true };
+        }
+        const folderId = parseDriveFolderId(folder);
+        if (!folderId) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: `Could not find a folder ID in "${folder}". Paste the folder's Drive URL (it contains /folders/<id>) or the ID itself.`,
+              },
+            ],
+            isError: true,
+          };
+        }
+
+        try {
+          const photos = await listFolderImages(folderId);
+          if (photos.length === 0) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `Folder ${folderId} has no images in it. Check it is the folder holding the photos rather than its parent.`,
+                },
+              ],
+              isError: true,
+            };
+          }
+          return {
+            content: [
+              {
+                type: "text",
+                text: [
+                  `${photos.length} photo${photos.length === 1 ? "" : "s"} in folder ${folderId}, in order:`,
+                  "",
+                  ...photos.map((p, i) => `${i + 1}. ${p.name} — ${p.fileId}`),
+                  "",
+                  "Pass these file IDs to create_listing as photos[].url, keeping this order.",
+                ].join("\n"),
+              },
+            ],
+          };
+        } catch (error) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: error instanceof Error ? error.message : String(error),
               },
             ],
             isError: true,
