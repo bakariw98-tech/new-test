@@ -40,7 +40,6 @@ export interface ListingStore {
 }
 
 const PREFIX = "listings";
-const INDEX_PATH = `${PREFIX}/_index.json`;
 
 function recordPath(slug: string): string {
   return `${PREFIX}/${slug}.json`;
@@ -158,10 +157,16 @@ export function createFileStore(dir: string): ListingStore {
 /* -------------------------------------------------------------------------- */
 
 /**
- * One JSON object per listing, plus an index so `list()` is a single read
- * rather than a fan-out. Note this is NOT `uploadToBlob` from
+ * One JSON object per listing. Note this is NOT `uploadToBlob` from
  * app/api/render/store.ts — that one is content-addressed by SHA, which is
  * right for immutable PNGs and wrong for a record that gets edited.
+ *
+ * `list()` enumerates through Blob's own listing API rather than maintaining an
+ * index object. The first version kept a `_index.json` updated on every save,
+ * which silently lost listings: read-modify-write over a store with eventual
+ * read-after-write consistency means a save can read a stale index and write it
+ * back, dropping whatever landed in between. Blob's listing is authoritative
+ * and cannot drift from what actually exists.
  */
 export function createBlobStore(): ListingStore {
   async function writeJson(pathname: string, value: unknown): Promise<void> {
@@ -183,24 +188,9 @@ export function createBlobStore(): ListingStore {
     return (await new Response(result.stream).json()) as T;
   }
 
-  async function readIndex(): Promise<ListingSummary[]> {
-    return (await readJson<ListingSummary[]>(INDEX_PATH)) ?? [];
-  }
-
-  async function writeIndex(entries: ListingSummary[]): Promise<void> {
-    await writeJson(
-      INDEX_PATH,
-      [...entries].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
-    );
-  }
-
   return {
     async save(record) {
       await writeJson(recordPath(record.listing.slug), record);
-      const summary = summarise(record);
-      const entries = (await readIndex()).filter((e) => e.slug !== summary.slug);
-      entries.push(summary);
-      await writeIndex(entries);
     },
 
     async get(slug) {
@@ -208,7 +198,23 @@ export function createBlobStore(): ListingStore {
     },
 
     async list() {
-      return readIndex();
+      const { list } = await import("@vercel/blob");
+      const slugs: string[] = [];
+      let cursor: string | undefined;
+      do {
+        const page = await list({ prefix: `${PREFIX}/`, cursor, limit: 1000 });
+        for (const blob of page.blobs) {
+          const name = blob.pathname.slice(PREFIX.length + 1);
+          if (name.endsWith(".json")) slugs.push(name.slice(0, -".json".length));
+        }
+        cursor = page.hasMore ? page.cursor : undefined;
+      } while (cursor);
+
+      const records = await Promise.all(slugs.map((slug) => this.get(slug)));
+      return records
+        .filter((r): r is ListingRecord => r !== null)
+        .map(summarise)
+        .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
     },
 
     async remove(slug) {
@@ -219,7 +225,6 @@ export function createBlobStore(): ListingStore {
         // Deleting something already gone is the desired end state, not a failure.
         if (!(error instanceof BlobNotFoundError)) throw error;
       }
-      await writeIndex((await readIndex()).filter((e) => e.slug !== slug));
     },
   };
 }
