@@ -6,6 +6,25 @@ import { checkImageSources, explainRenderError, lintMarkup } from "../render/lin
 import { blobConfigured, selfDescribingUrl, uploadToBlob } from "../render/store";
 import { DRIVE_SETUP_HINT, deleteFromDrive, driveMode, ensureFolderPath, uploadToDrive } from "../render/drive";
 import { closingSlide, listingCard, PRESETS, SAFE_BOTTOM, tourSlide } from "../render/listing";
+import { siteUrl } from "../../../lib/core/context";
+import {
+  listingStore,
+  listingStoreKind,
+  slugForListing,
+  type ListingRecord,
+} from "../../../lib/store/listings";
+
+/**
+ * Without a Blob token the store is a per-process Map. That is fine locally and
+ * broken on Vercel, where the next request lands on a different lambda and the
+ * page 404s — so say so at the point the listing is created rather than letting
+ * someone discover it from a dead link.
+ */
+function storageWarning(): string {
+  return listingStoreKind() === "file"
+    ? "\nNote: no Blob token is configured, so this listing is stored in a local .listings directory. That is fine for development and will not exist on a deployment."
+    : "";
+}
 
 const handler = createMcpHandler(
   (server) => {
@@ -482,6 +501,267 @@ const handler = createMcpHandler(
       },
     );
 
+    server.registerTool(
+      "create_listing",
+      {
+        title: "Create Listing Website",
+        description: [
+          "Publishes a property to a hosted website and returns its live URL.",
+          "",
+          "This is the fastest way to get a listing online: hand over the property data, the",
+          "photo URLs and the agent's branding, and the page is built and served at",
+          "/p/<address-slug>. The theme supplies every colour and typeface, so the page looks",
+          "designed without anyone making design decisions.",
+          "",
+          "Values are RAW, not pre-formatted. Send priceCents: 849500000, not \"$8,495,000\".",
+          "The server does the formatting so the website, the carousel and everything added",
+          "later show the same number the same way.",
+          "",
+          "Photos: pass public https:// URLs, or bare Google Drive file IDs for photos uploaded",
+          "through this server. The first photo becomes the hero unless one is marked hero.",
+          "Order is the order you pass them in.",
+          "",
+          "Re-running with the same street address UPDATES that listing rather than creating a",
+          "duplicate, so correcting a typo is just another call. Pass the slug returned earlier",
+          "to be certain which listing you are editing.",
+        ].join("\n"),
+        annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+        inputSchema: z.object({
+          slug: z
+            .string()
+            .max(80)
+            .optional()
+            .describe("Update this exact listing. Omit when creating; derived from the street."),
+          theme: z
+            .enum(["minimal", "luxury", "modern"])
+            .default("minimal")
+            .describe(
+              "minimal = warm paper and editorial serif. luxury = near-black with brass. modern = deep navy with gold.",
+            ),
+          listing: z.object({
+            street: z.string().min(1).max(120).describe('e.g. "1166 San Ysidro Dr"'),
+            city: z.string().min(1).max(80),
+            state: z.string().min(1).max(40),
+            zip: z.string().max(20).default(""),
+            priceCents: z.number().int().nonnegative().describe("849500000 for $8,495,000"),
+            beds: z.number().int().nonnegative(),
+            bathsFull: z.number().int().nonnegative(),
+            bathsHalf: z.number().int().nonnegative().default(0),
+            sqft: z.number().int().positive().nullable().default(null),
+            lotSqft: z.number().int().positive().nullable().default(null),
+            yearBuilt: z.number().int().nullable().default(null),
+            description: z
+              .string()
+              .max(4000)
+              .default("")
+              .describe("A paragraph or two. Describe the property, never the neighbours."),
+            features: z
+              .array(z.string().max(80))
+              .max(30)
+              .default([])
+              .describe('Short phrases: "Chef\'s kitchen", "Guest house", "Pool".'),
+            mlsId: z.string().max(60).nullable().default(null),
+          }),
+          photos: z
+            .array(
+              z.object({
+                url: z.string().min(1).describe("Public https:// URL or a Drive file ID."),
+                alt: z.string().max(200).optional(),
+                role: z.enum(["hero", "gallery"]).default("gallery"),
+              }),
+            )
+            .min(1)
+            .max(40),
+          brand: z.object({
+            agentName: z.string().min(1).max(120),
+            agentTitle: z.string().max(120).nullable().default(null),
+            phone: z.string().max(40).nullable().default(null),
+            email: z.string().max(200).nullable().default(null),
+            brokerageName: z.string().min(1).max(160),
+            brokerageLicense: z.string().max(80).nullable().default(null),
+            headshotUrl: z.string().max(2000).nullable().default(null),
+            logoUrl: z.string().max(2000).nullable().default(null),
+            instagram: z.string().max(120).nullable().default(null),
+            facebook: z.string().max(200).nullable().default(null),
+            linkedin: z.string().max(200).nullable().default(null),
+            website: z.string().max(200).nullable().default(null),
+            accentColor: z
+              .string()
+              .regex(/^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/)
+              .nullable()
+              .default(null)
+              .describe("Optional brand colour. Text on it stays readable automatically."),
+            ctaText: z.string().max(80).default("Book a private showing"),
+            legalDisclaimer: z.string().max(400).nullable().default(null),
+          }),
+        }),
+      },
+      async ({ slug, theme, listing, photos, brand }) => {
+        try {
+          const store = listingStore();
+          const resolvedSlug = await slugForListing(store, listing, slug);
+          const existing = await store.get(resolvedSlug);
+          const now = new Date().toISOString();
+
+          // A photo explicitly marked hero wins; otherwise the first one is it.
+          const heroIndex = Math.max(
+            0,
+            photos.findIndex((p) => p.role === "hero"),
+          );
+
+          const record: ListingRecord = {
+            listing: {
+              id: existing?.listing.id ?? crypto.randomUUID(),
+              accountId: existing?.listing.accountId ?? "default",
+              slug: resolvedSlug,
+              status: "published",
+              street: listing.street,
+              city: listing.city,
+              state: listing.state,
+              zip: listing.zip,
+              priceCents: listing.priceCents,
+              beds: listing.beds,
+              bathsFull: listing.bathsFull,
+              bathsHalf: listing.bathsHalf,
+              sqft: listing.sqft,
+              lotSqft: listing.lotSqft,
+              yearBuilt: listing.yearBuilt,
+              description: listing.description,
+              features: listing.features,
+              mlsId: listing.mlsId,
+              publishedAt: existing?.listing.publishedAt ?? now,
+            },
+            photos: photos.map((photo, index) => ({
+              id: `${resolvedSlug}-${index}`,
+              url: photo.url,
+              sortOrder: index,
+              role: index === heroIndex ? "hero" : "gallery",
+              width: null,
+              height: null,
+              alt: photo.alt ?? null,
+            })),
+            brand: {
+              accountId: "default",
+              agentUserId: null,
+              logoUrl: brand.logoUrl,
+              headshotUrl: brand.headshotUrl,
+              accentColor: brand.accentColor,
+              headingFont: null,
+              bodyFont: null,
+              agentName: brand.agentName,
+              agentTitle: brand.agentTitle,
+              phone: brand.phone,
+              email: brand.email,
+              brokerageName: brand.brokerageName,
+              brokerageLicense: brand.brokerageLicense,
+              instagram: brand.instagram,
+              facebook: brand.facebook,
+              linkedin: brand.linkedin,
+              website: brand.website,
+              ctaText: brand.ctaText,
+              legalDisclaimer: brand.legalDisclaimer,
+              defaultTheme: theme,
+            },
+            themeId: theme,
+            updatedAt: now,
+          };
+
+          await store.save(record);
+
+          return {
+            content: [
+              {
+                type: "text",
+                text: [
+                  siteUrl(resolvedSlug),
+                  "",
+                  `${existing ? "Updated" : "Published"} ${listing.street} with ${photos.length} photo${photos.length === 1 ? "" : "s"} on the ${theme} theme.`,
+                  `Slug: ${resolvedSlug} — pass this back to edit or delete this listing.`,
+                  storageWarning(),
+                ]
+                  .filter(Boolean)
+                  .join("\n"),
+              },
+            ],
+          };
+        } catch (error) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: `Could not publish the listing: ${error instanceof Error ? error.message : String(error)}`,
+              },
+            ],
+            isError: true,
+          };
+        }
+      },
+    );
+
+    server.registerTool(
+      "delete_listing",
+      {
+        title: "Delete Listing Website",
+        description: [
+          "Takes a published property page offline. Its URL will 404 afterwards.",
+          "",
+          "Deleting is permanent and the page may already be linked from social posts or a",
+          "printed flyer, so confirm with the person before removing anything.",
+        ].join("\n"),
+        annotations: { destructiveHint: true, idempotentHint: true, openWorldHint: false },
+        inputSchema: z.object({
+          slug: z.string().min(1).max(80).describe("As returned by create_listing."),
+        }),
+      },
+      async ({ slug }) => {
+        try {
+          await listingStore().remove(slug);
+          return { content: [{ type: "text", text: `Deleted listing ${slug}.` }] };
+        } catch (error) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: `Could not delete ${slug}: ${error instanceof Error ? error.message : String(error)}`,
+              },
+            ],
+            isError: true,
+          };
+        }
+      },
+    );
+
+    server.registerTool(
+      "list_listings",
+      {
+        title: "List Published Listings",
+        description:
+          "Every property currently published by this server, newest first, with the slug needed to edit or delete each one.",
+        annotations: { readOnlyHint: true, openWorldHint: false },
+        inputSchema: z.object({}),
+      },
+      async () => {
+        const summaries = await listingStore().list();
+        if (summaries.length === 0) {
+          return {
+            content: [
+              { type: "text", text: "No listings published yet. Use create_listing to add one." },
+            ],
+          };
+        }
+        return {
+          content: [
+            {
+              type: "text",
+              text: summaries
+                .map((s) => `${s.slug} — ${s.street}, ${s.cityState} — ${siteUrl(s.slug)}`)
+                .join("\n"),
+            },
+          ],
+        };
+      },
+    );
+
     server.registerResource(
       "listing-guide",
       "render://listing-guide",
@@ -696,7 +976,8 @@ covers.
                 "5. List the slide URLs in order, and say what the hook is doing.",
                 "",
                 "Keep meaningful content out of the bottom 15% of each slide — the Instagram UI",
-                "covers it. Only Inter 400 and 700 are available.",
+                "covers it. Available fonts are Inter, Poppins and Playfair Display (400 and 700),",
+                "plus DM Serif Display (400 only). Any other family silently falls back.",
               ].join("\n"),
             },
           },
@@ -782,8 +1063,12 @@ covers.
             uri: uri.href,
             text: [
               "hello-world-mcp",
-              "A minimal Model Context Protocol server hosted on Vercel.",
-              "Tools: hello_world, echo, server_time, render_image.",
+              "A listing marketing renderer hosted on Vercel, speaking MCP.",
+              "Tools: hello_world, echo, server_time, render_image,",
+              "render_listing_carousel, delete_drive_file.",
+              "",
+              "Start with render://listing-guide for the carousel workflow, or",
+              "render://guide for the markup rules behind render_image.",
             ].join("\n"),
           },
         ],

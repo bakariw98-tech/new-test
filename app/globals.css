@@ -1,3 +1,12 @@
+/*
+ * Chrome for the admin pages (the landing page and the uploader).
+ *
+ * These rules are scoped to .doc rather than to bare elements. This file is
+ * imported by the root layout, so an unscoped `main` or `h1` rule reaches every
+ * page in the app — which is how the property page at /p/[slug] ended up
+ * squeezed into a 44rem column with a dark body behind it.
+ */
+
 :root {
   color-scheme: light dark;
   --bg: #ffffff;
@@ -15,6 +24,7 @@
     --border: #262626;
     --code-bg: #161616;
   }
+
 }
 
 * {
@@ -23,6 +33,11 @@
 
 body {
   margin: 0;
+}
+
+.doc {
+  max-width: 44rem;
+  margin: 0 auto;
   padding: 3rem 1.5rem 5rem;
   background: var(--bg);
   color: var(--fg);
@@ -30,18 +45,13 @@ body {
   line-height: 1.6;
 }
 
-main {
-  max-width: 44rem;
-  margin: 0 auto;
-}
-
-h1 {
+.doc h1 {
   font-size: 1.75rem;
   margin: 0 0 0.25rem;
   letter-spacing: -0.02em;
 }
 
-h2 {
+.doc h2 {
   font-size: 1rem;
   margin: 2.5rem 0 0.75rem;
   text-transform: uppercase;
@@ -49,16 +59,16 @@ h2 {
   color: var(--muted);
 }
 
-p {
+.doc p {
   margin: 0 0 1rem;
 }
 
-.tagline {
+.doc .tagline {
   color: var(--muted);
   margin-bottom: 2rem;
 }
 
-code {
+.doc code {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.875em;
   background: var(--code-bg);
@@ -67,7 +77,7 @@ code {
   padding: 0.1em 0.35em;
 }
 
-pre {
+.doc pre {
   background: var(--code-bg);
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -76,13 +86,13 @@ pre {
   margin: 0 0 1rem;
 }
 
-pre code {
+.doc pre code {
   background: none;
   border: none;
   padding: 0;
 }
 
-table {
+.doc table {
   width: 100%;
   border-collapse: collapse;
   margin-bottom: 1rem;
@@ -90,26 +100,26 @@ table {
   overflow-x: auto;
 }
 
-th,
-td {
+.doc th,
+.doc td {
   text-align: left;
   padding: 0.5rem 0.75rem;
   border-bottom: 1px solid var(--border);
   vertical-align: top;
 }
 
-th {
+.doc th {
   font-size: 0.8rem;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--muted);
 }
 
-td code {
+.doc td code {
   white-space: nowrap;
 }
 
-.status {
+.doc .status {
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
@@ -121,14 +131,14 @@ td code {
   margin-bottom: 2rem;
 }
 
-.dot {
+.doc .dot {
   width: 0.5rem;
   height: 0.5rem;
   border-radius: 999px;
   background: #22c55e;
 }
 
-.dropzone {
+.doc .dropzone {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -148,26 +158,26 @@ td code {
   background: var(--code-bg);
 }
 
-.dropzone span {
+.doc .dropzone span {
   color: var(--muted);
   font-size: 0.9rem;
 }
 
-.status-line {
+.doc .status-line {
   margin-top: 1rem;
   font-size: 0.9rem;
   color: var(--muted);
 }
 
-.status-line.error {
+.doc .status-line.error {
   color: #ef4444;
 }
 
-.status-line.done {
+.doc .status-line.done {
   color: #22c55e;
 }
 
-button {
+.doc button {
   font: inherit;
   font-size: 0.9rem;
   padding: 0.5rem 1rem;

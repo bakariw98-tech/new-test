@@ -18,13 +18,6 @@ import type { SizeName } from "./render";
  *   a blob URL but still ~3 orders of magnitude smaller than the PNG.
  */
 
-export type RenderRef = {
-  url: string;
-  backend: "blob" | "self-describing";
-  bytes: number;
-  note?: string;
-};
-
 /** Query strings this long start running into proxy and browser limits. */
 const MAX_ENCODED_LENGTH = 6000;
 

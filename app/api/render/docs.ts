@@ -173,6 +173,30 @@ skew), \`clipPath\`, \`maskImage\`.
 \`saturate\`, \`sepia\`. Treat these as stylisation, not colour grading — there are
 no LUTs, curves, or per-channel controls.
 
+## Curves and custom shapes (inline SVG)
+
+Flexbox only makes rectangles, which is why plain layouts look boxy. For actual
+curves — a wave sweeping a photo into a footer, a blob, an organic divider —
+use an inline \`<svg>\` with a \`<path>\`. Satori renders SVG natively, and it is
+the single biggest lever for making a layout look designed rather than stacked.
+
+\`\`\`html
+<!-- a concave sweep: dips in the centre, lifts at the edges -->
+<svg width="1080" height="220" viewBox="0 0 1080 220" style="position:absolute;left:0;top:690px">
+  <path d="M0 40 C 360 190, 720 190, 1080 40 L1080 220 L0 220 Z" fill="#F4F1EC"/>
+  <path d="M0 40 C 360 190, 720 190, 1080 40" fill="none" stroke="#1A1A1A" stroke-width="5"/>
+</svg>
+\`\`\`
+
+- Place the SVG absolutely over the seam between a photo and a panel, filled in
+  the panel colour, and the photo appears to curve into the panel.
+- \`C\` (cubic Bézier) and \`Q\` (quadratic) path commands are what bend the line;
+  a straight \`L\` is a flat edge. A second \`<path>\` with \`fill="none"\` and a
+  \`stroke\` traces an accent line along the same curve.
+- A giant circle also works for soft blobs: a \`border-radius:50%\` div far larger
+  than the frame, positioned partly off-canvas, inside a \`overflow:hidden\` parent.
+- SVG elements do **not** need \`display:flex\` the way transformed/clipped divs do.
+
 ## Sizes
 
 | Preset | Pixels | Use |

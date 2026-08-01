@@ -1,5 +1,6 @@
 import { driveMode } from "../render/drive";
 import { blobConfigured } from "../render/store";
+import { listingStoreKind } from "../../../lib/store/listings";
 
 export const runtime = "nodejs";
 
@@ -35,6 +36,11 @@ export async function GET() {
         GOOGLE_DRIVE_FOLDER_ID: describe("GOOGLE_DRIVE_FOLDER_ID"),
       },
       blob: { configured: blobConfigured() },
+      listings: {
+        // blob = durable. file = local dev only. unavailable = deployed with
+        // nowhere to write, so create_listing will refuse with setup steps.
+        store: listingStoreKind(),
+      },
     },
     { headers: { "Cache-Control": "no-store" } },
   );
