@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, test } from "vitest";
 import {
+  createFileStore,
   createMemoryStore,
   slugForListing,
   uniqueSlug,
@@ -113,6 +114,21 @@ describe("index", () => {
 
   test("removing a slug that was never there is not an error", async () => {
     await expect(store.remove("ghost")).resolves.toBeUndefined();
+  });
+
+  test("a file store skips objects that are not listings", async () => {
+    const { mkdtempSync, writeFileSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const dir = mkdtempSync(`${tmpdir()}/listings-`);
+    const fileStore = createFileStore(dir);
+
+    await fileStore.save(record());
+    // The retired index object, still present in existing buckets, parses fine
+    // as JSON but has no .listing and used to crash the whole index.
+    writeFileSync(`${dir}/_index.json`, JSON.stringify([{ slug: "stale" }]), "utf8");
+    writeFileSync(`${dir}/broken.json`, "{not json", "utf8");
+
+    expect((await fileStore.list()).map((s) => s.slug)).toEqual(["1166-san-ysidro-dr"]);
   });
 
   test("summaries carry what a listing index needs to display", async () => {

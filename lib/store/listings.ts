@@ -45,6 +45,14 @@ function recordPath(slug: string): string {
   return `${PREFIX}/${slug}.json`;
 }
 
+/**
+ * A store built on loose JSON files can hand back anything that parses. One bad
+ * object should not take down the whole listing index, so it is skipped.
+ */
+function isListingRecord(value: unknown): value is ListingRecord {
+  return typeof (value as ListingRecord | null)?.listing?.slug === "string";
+}
+
 function summarise(record: ListingRecord): ListingSummary {
   return {
     slug: record.listing.slug,
@@ -116,13 +124,13 @@ export function createFileStore(dir: string): ListingStore {
         .filter((n) => n.endsWith(".json"))
         .map(async (n) => {
           try {
-            return JSON.parse(await readFile(`${dir}/${n}`, "utf8")) as ListingRecord;
+            return JSON.parse(await readFile(`${dir}/${n}`, "utf8")) as unknown;
           } catch {
             return null;
           }
         }),
     );
-    return records.filter((r): r is ListingRecord => r !== null);
+    return records.filter(isListingRecord);
   }
 
   return {
@@ -205,14 +213,18 @@ export function createBlobStore(): ListingStore {
         const page = await list({ prefix: `${PREFIX}/`, cursor, limit: 1000 });
         for (const blob of page.blobs) {
           const name = blob.pathname.slice(PREFIX.length + 1);
-          if (name.endsWith(".json")) slugs.push(name.slice(0, -".json".length));
+          // A leading underscore marks bookkeeping objects, not listings — the
+          // retired _index.json is still sitting in existing buckets.
+          if (name.endsWith(".json") && !name.startsWith("_")) {
+            slugs.push(name.slice(0, -".json".length));
+          }
         }
         cursor = page.hasMore ? page.cursor : undefined;
       } while (cursor);
 
-      const records = await Promise.all(slugs.map((slug) => this.get(slug)));
+      const records = await Promise.all(slugs.map((slug) => readJson<ListingRecord>(recordPath(slug))));
       return records
-        .filter((r): r is ListingRecord => r !== null)
+        .filter(isListingRecord)
         .map(summarise)
         .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
     },
