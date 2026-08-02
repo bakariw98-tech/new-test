@@ -122,6 +122,20 @@ export function planCarousel(context: RenderContext, options?: { captions?: stri
  * the same property cannot disagree about its price, because neither of them
  * formats one.
  */
+/**
+ * The URL the video renderer will actually fetch for a photo.
+ *
+ * Exported because the preflight check has to probe the same URL the renderer
+ * uses — checking the original source instead would pass on a Drive file that
+ * `/api/image` cannot read, which is the exact failure worth catching.
+ */
+export function videoPhotoUrl(context: RenderContext, url: string): string {
+  const origin = context.urls.site.replace(/\/p\/[^/]*$/, "");
+  // Landscape-friendly dimensions: video frames are wider than a 4:5 slide, and
+  // requesting a tall crop here would throw away the sides.
+  return `${origin}${photoSrc(url, { width: 1920, height: 1080 })}`;
+}
+
 export function planVideo(context: RenderContext): {
   listing: SlideProps["listing"];
   brand: SlideProps["brand"];
@@ -132,9 +146,7 @@ export function planVideo(context: RenderContext): {
   const { brand, formatted, photos } = context;
 
   const media = photos.map((photo) => ({
-    // Landscape-friendly dimensions: video frames are wider than a 4:5 slide,
-    // and requesting a tall crop here would throw away the sides.
-    url: `${context.urls.site.replace(/\/p\/[^/]*$/, "")}${photoSrc(photo.url, { width: 1920, height: 1080 })}`,
+    url: videoPhotoUrl(context, photo.url),
     alt: photo.alt ?? undefined,
   }));
 

@@ -14,23 +14,57 @@
 import { randomUUID } from "node:crypto";
 import { uploadRender } from "../../app/api/render/store";
 import { resolveRenderContext } from "../core/context";
+import type { RenderContext } from "../core/types";
 import { planVideo } from "../renderers/carousel/plan";
 import { renderVideo, type VideoId } from "../renderers/remotion/render";
+import { preflightVideoPhotos } from "./preflight";
 import { jobStore, throttledProgress } from "./store";
 import type { Job } from "./types";
 
 export const VIDEO_VARIANTS = ["ListingVideo-9x16", "ListingVideo-16x9"] as const;
 
 /**
- * Where the render actually happens.
+ * How many times starting a render may be tried.
  *
- * On Vercel the renderer cannot live in the function — Chromium and FFmpeg
- * exceed the function size limit — so the work goes to a Sandbox and progress
- * is polled. Anywhere else, rendering in-process is simpler and is what makes
- * `npm run dev` work with no cloud account at all.
+ * Two, not more. Setup takes the better part of a minute and it all happens
+ * inside one function invocation capped at five, so a third attempt risks being
+ * cut off partway and leaving a sandbox nobody polls. One retry covers the
+ * failure this exists for — a transient refusal from the sandbox API — and
+ * anything that fails twice is not transient.
  */
-function renderStrategy(): "sandbox" | "in-process" {
-  return process.env.VERCEL ? "sandbox" : "in-process";
+const MAX_SETUP_ATTEMPTS = 2;
+
+const RETRY_BACKOFF_MS = 3000;
+
+const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Whether starting the render is worth trying again.
+ *
+ * The distinction that matters is transient versus deterministic. A sandbox the
+ * API declined to create may well be created a moment later; a composition that
+ * does not exist will not start existing. Retrying the second kind spends
+ * another minute to reach the same answer, which is how a clear error message
+ * turns into a slow one.
+ *
+ * Deliberately conservative in the other direction too: an unrecognised error
+ * is treated as retryable, because the cost of one extra attempt is a minute
+ * and the cost of not retrying a flake is a failed render in front of a
+ * customer.
+ */
+export function isRetryableSetupError(error: unknown): boolean {
+  const message = (error instanceof Error ? error.message : String(error)).toLowerCase();
+
+  // Deterministic for this input — the same attempt produces the same failure.
+  if (
+    /blob_read_write_token|no composition|cannot find composition|could not find the composition|out of memory|enoent|no such file/.test(
+      message,
+    )
+  ) {
+    return false;
+  }
+
+  return true;
 }
 
 export async function startVideoJob(params: {
@@ -80,6 +114,51 @@ export async function startVideoJob(params: {
 }
 
 /**
+ * Where the render actually happens.
+ *
+ * On Vercel the renderer cannot live in the function — Chromium and FFmpeg
+ * exceed the function size limit — so the work goes to a Sandbox and progress
+ * is polled. Anywhere else, rendering in-process is simpler and is what makes
+ * `npm run dev` work with no cloud account at all.
+ */
+function renderStrategy(): "sandbox" | "in-process" {
+  return process.env.VERCEL ? "sandbox" : "in-process";
+}
+
+type Prepared = { context: RenderContext; warnings: string[] };
+
+/**
+ * Everything that must be true before a render is worth starting.
+ *
+ * All three checks are cheap and all three catch failures that would otherwise
+ * surface a minute or two into a render that has already been paid for.
+ * Returns null having already recorded the failure, so callers just stop.
+ */
+async function prepare(job: Job): Promise<Prepared | null> {
+  const store = jobStore();
+  const fail = async (error: string): Promise<null> => {
+    await store.save({ ...job, status: "failed", error, updatedAt: new Date().toISOString() });
+    return null;
+  };
+
+  const context = await resolveRenderContext(job.slug, { medium: "carousel" });
+  if (!context) {
+    return fail(
+      `No listing named "${job.slug}". Publish it first, or check list_listings for the right slug.`,
+    );
+  }
+
+  if (context.photos.length === 0) {
+    return fail("That listing has no photos, so there is nothing to make a video from.");
+  }
+
+  const preflight = await preflightVideoPhotos(context);
+  if (preflight.fatal) return fail(preflight.fatal);
+
+  return { context: preflight.context, warnings: preflight.warnings };
+}
+
+/**
  * Hands the render to a Vercel Sandbox and records the handle.
  *
  * Nothing is awaited beyond the point the render *starts*: the sandbox keeps
@@ -88,42 +167,58 @@ export async function startVideoJob(params: {
 async function startSandboxJob(job: Job): Promise<void> {
   const store = jobStore();
 
-  const context = await resolveRenderContext(job.slug, { medium: "carousel" });
-  if (!context) {
-    await store.save({
-      ...job,
-      status: "failed",
-      error: `No listing named "${job.slug}". Publish it first, or check list_listings for the right slug.`,
-      updatedAt: new Date().toISOString(),
-    });
-    return;
-  }
+  const prepared = await prepare(job);
+  if (!prepared) return;
 
-  if (context.photos.length === 0) {
-    await store.save({
-      ...job,
-      status: "failed",
-      error: "That listing has no photos, so there is nothing to make a video from.",
-      updatedAt: new Date().toISOString(),
-    });
-    return;
-  }
+  // Carried into every subsequent write. Spreading the original `job` would
+  // quietly drop the preflight warnings on the next save.
+  const base: Job = {
+    ...job,
+    warnings: prepared.warnings.length > 0 ? prepared.warnings : undefined,
+  };
 
+  const props = planVideo(prepared.context) as unknown as Record<string, unknown>;
   const { startVercelRender } = await import("../renderers/remotion/vercel");
 
-  await store.save({ ...job, status: "running", updatedAt: new Date().toISOString() });
+  for (let attempt = 1; attempt <= MAX_SETUP_ATTEMPTS; attempt++) {
+    await store.save({
+      ...base,
+      status: "running",
+      attempts: attempt,
+      updatedAt: new Date().toISOString(),
+    });
 
-  const handle = await startVercelRender({
-    id: job.variant as VideoId,
-    props: planVideo(context) as unknown as Record<string, unknown>,
-  });
+    try {
+      const handle = await startVercelRender({ id: job.variant as VideoId, props });
+      await store.save({
+        ...base,
+        status: "running",
+        attempts: attempt,
+        sandbox: handle,
+        updatedAt: new Date().toISOString(),
+      });
+      return;
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      const lastAttempt = attempt === MAX_SETUP_ATTEMPTS;
 
-  await store.save({
-    ...job,
-    status: "running",
-    sandbox: handle,
-    updatedAt: new Date().toISOString(),
-  });
+      if (lastAttempt || !isRetryableSetupError(error)) {
+        await store.save({
+          ...base,
+          status: "failed",
+          attempts: attempt,
+          error:
+            attempt > 1
+              ? `Could not start the render after ${attempt} attempts: ${reason}`
+              : `Could not start the render: ${reason}`,
+          updatedAt: new Date().toISOString(),
+        });
+        return;
+      }
+
+      await delay(RETRY_BACKOFF_MS * attempt);
+    }
+  }
 }
 
 /**
@@ -164,39 +259,26 @@ async function runVideoJob(job: Job): Promise<void> {
   const store = jobStore();
   const started = Date.now();
 
-  const context = await resolveRenderContext(job.slug, { medium: "carousel" });
-  if (!context) {
-    await store.save({
-      ...job,
-      status: "failed",
-      error: `No listing named "${job.slug}". Publish it first, or check list_listings for the right slug.`,
-      updatedAt: new Date().toISOString(),
-    });
-    return;
-  }
+  const prepared = await prepare(job);
+  if (!prepared) return;
 
-  if (context.photos.length === 0) {
-    await store.save({
-      ...job,
-      status: "failed",
-      error: "That listing has no photos, so there is nothing to make a video from.",
-      updatedAt: new Date().toISOString(),
-    });
-    return;
-  }
+  const base: Job = {
+    ...job,
+    warnings: prepared.warnings.length > 0 ? prepared.warnings : undefined,
+  };
 
-  await store.save({ ...job, status: "running", updatedAt: new Date().toISOString() });
+  await store.save({ ...base, status: "running", updatedAt: new Date().toISOString() });
 
   const { bytes, durationInFrames, fps } = await renderVideo({
     id: job.variant as VideoId,
-    props: planVideo(context) as unknown as Record<string, unknown>,
-    onProgress: throttledProgress(job),
+    props: planVideo(prepared.context) as unknown as Record<string, unknown>,
+    onProgress: throttledProgress(base),
   });
 
   const outputUrl = await uploadRender(bytes, { extension: "mp4", contentType: "video/mp4" });
 
   await store.save({
-    ...job,
+    ...base,
     status: "done",
     progress: 100,
     outputUrl,

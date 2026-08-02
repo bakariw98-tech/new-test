@@ -3,6 +3,7 @@
  * generic Satori stack trace. Errors block the render; warnings do not.
  */
 
+import { probeImages } from "../../../lib/media/probe";
 import { FONT_FAMILIES } from "./render";
 
 export type LintResult = { errors: string[]; warnings: string[] };
@@ -163,40 +164,32 @@ export async function checkImageSources(markup: string, timeoutMs = 5000): Promi
     urls.add(match[1]);
   }
 
-  const problems = await Promise.all(
-    [...urls].map(async (url) => {
-      try {
-        const response = await fetch(url, {
-          method: "GET",
-          headers: { Range: "bytes=0-0" },
-          signal: AbortSignal.timeout(timeoutMs),
-        });
+  const probes = await probeImages([...urls], { timeoutMs });
 
-        if (!response.ok && response.status !== 206) {
-          return `Image URL ${url} returned HTTP ${response.status}. The render would silently omit it — use a reachable URL.`;
-        }
-
-        const type = response.headers.get("content-type") ?? "";
-        if (type && !/^image\//i.test(type)) {
-          return `Image URL ${url} served content-type "${type}" rather than an image. Satori cannot decode it and would omit it silently.`;
-        }
-
-        // WebP and AVIF are images, so they pass the check above, but Satori
-        // cannot decode either — and it fails with a misleading message about
-        // dimensions. Route them through the normaliser instead.
-        if (/^image\/(webp|avif)$/i.test(type)) {
-          const format = type.split("/")[1].toLowerCase();
-          return `Image URL ${url} is ${format.toUpperCase()}, which cannot be decoded (it fails with a confusing "Image size cannot be determined" error). Wrap it: /api/image?src=${encodeURIComponent(url)}&w=1080 — that converts it to JPEG on the fly.`;
-        }
-        return null;
-      } catch (error) {
-        const reason = error instanceof Error ? error.message : String(error);
-        return `Image URL ${url} could not be fetched (${reason}). The render would succeed but omit the image.`;
+  return probes
+    .map(({ url, ok, status, contentType, transportError }) => {
+      if (transportError) {
+        return `Image URL ${url} could not be fetched (${transportError}). The render would succeed but omit the image.`;
       }
-    }),
-  );
+      if (!ok) {
+        return `Image URL ${url} returned HTTP ${status}. The render would silently omit it — use a reachable URL.`;
+      }
 
-  return problems.filter((p): p is string => p !== null);
+      const type = contentType ?? "";
+      if (type && !/^image\//i.test(type)) {
+        return `Image URL ${url} served content-type "${type}" rather than an image. Satori cannot decode it and would omit it silently.`;
+      }
+
+      // WebP and AVIF are images, so they pass the check above, but Satori
+      // cannot decode either — and it fails with a misleading message about
+      // dimensions. Route them through the normaliser instead.
+      if (/^image\/(webp|avif)$/i.test(type)) {
+        const format = type.split("/")[1].toLowerCase();
+        return `Image URL ${url} is ${format.toUpperCase()}, which cannot be decoded (it fails with a confusing "Image size cannot be determined" error). Wrap it: /api/image?src=${encodeURIComponent(url)}&w=1080 — that converts it to JPEG on the fly.`;
+      }
+      return null;
+    })
+    .filter((p): p is string => p !== null);
 }
 
 /**

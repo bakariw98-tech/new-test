@@ -34,8 +34,9 @@ function settle(job: Job): Job {
   return {
     ...job,
     status: "failed",
-    error:
-      "The render stopped reporting progress and is presumed dead. This usually means the process that owned it was recycled mid-render — start it again on a host that stays alive long enough.",
+    error: job.sandbox
+      ? "The render stopped reporting progress and is presumed dead. This usually means the process that owned it was recycled mid-render — start it again on a host that stays alive long enough."
+      : "The render never got as far as starting — setup was interrupted before a renderer was allocated, so nothing was ever running. Start it again; this one is transient and usually succeeds on the next attempt.",
   };
 }
 

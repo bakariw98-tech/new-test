@@ -1003,13 +1003,19 @@ const handler = createMcpHandler(
           };
         }
 
+        // A photo that could not be loaded is dropped rather than failing the
+        // render, so the only place the agent can learn about it is here.
+        const warnings = job.warnings?.length
+          ? `\n\n${job.warnings.join("\n")}\nRe-share those files and render again to include them.`
+          : "";
+
         if (job.status === "done") {
           const seconds = job.durationMs ? ` Rendered in ${Math.round(job.durationMs / 1000)}s.` : "";
           return {
             content: [
               {
                 type: "text",
-                text: `${job.outputUrl}\n\nDone — ${job.variant} for ${job.slug}.${seconds}`,
+                text: `${job.outputUrl}\n\nDone — ${job.variant} for ${job.slug}.${seconds}${warnings}`,
               },
             ],
           };
@@ -1017,7 +1023,9 @@ const handler = createMcpHandler(
 
         if (job.status === "failed") {
           return {
-            content: [{ type: "text", text: `Render failed: ${job.error ?? "no reason recorded"}` }],
+            content: [
+              { type: "text", text: `Render failed: ${job.error ?? "no reason recorded"}${warnings}` },
+            ],
             isError: true,
           };
         }

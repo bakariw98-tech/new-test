@@ -34,6 +34,14 @@ export type Job = {
    * job nobody checks costs nothing to track.
    */
   sandbox?: { sandboxId: string; cmdId: string };
+  /** How many times starting this render has been tried. */
+  attempts?: number;
+  /**
+   * Non-fatal problems found before rendering — a photo that could not be
+   * loaded and was skipped. The render still produced a video; the agent should
+   * still be told what is missing from it.
+   */
+  warnings?: string[];
 };
 
 /**
@@ -43,7 +51,29 @@ export type Job = {
  */
 export const STALE_AFTER_MS = 20 * 60 * 1000;
 
+/**
+ * The same rule, much tighter, for a job that has not reached the point of
+ * having somewhere to poll.
+ *
+ * Setup — resolving the listing, probing photos, creating a sandbox, copying
+ * the bundle in — measured under a minute, and the function it runs in is
+ * capped at five. So a job with no sandbox handle after this long did not get
+ * one and never will: the function was recycled mid-setup. Left on the
+ * twenty-minute rule it sits "running" for nineteen minutes with nothing behind
+ * it, which is the difference between a failure and a hang.
+ */
+export const SETUP_STALE_AFTER_MS = 5 * 60 * 1000;
+
+/**
+ * A sandbox job stops updating `updatedAt` once it has a handle — progress is
+ * pulled on read — so its window has to cover a whole render. The in-process
+ * path writes progress every few seconds and is comfortably inside either.
+ */
+export function staleAfter(job: Job): number {
+  return job.sandbox ? STALE_AFTER_MS : SETUP_STALE_AFTER_MS;
+}
+
 export function isStale(job: Job, now = Date.now()): boolean {
   if (job.status !== "running" && job.status !== "queued") return false;
-  return now - new Date(job.updatedAt).getTime() > STALE_AFTER_MS;
+  return now - new Date(job.updatedAt).getTime() > staleAfter(job);
 }
