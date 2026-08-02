@@ -32,7 +32,7 @@ function browserExecutable(): string | null {
   return process.env.REMOTION_BROWSER_EXECUTABLE ?? process.env.CHROMIUM_PATH ?? null;
 }
 
-async function getBundle(): Promise<string> {
+export async function getBundle(): Promise<string> {
   if (!bundlePromise) {
     bundlePromise = (async () => {
       const { bundle } = await import("@remotion/bundler");

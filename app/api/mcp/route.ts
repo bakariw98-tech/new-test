@@ -15,7 +15,7 @@ import {
 } from "../render/drive";
 import { closingSlide, listingCard, PRESETS, SAFE_BOTTOM, tourSlide } from "../render/listing";
 import { siteUrl } from "../../../lib/core/context";
-import { renderHostWarning, startVideoJob } from "../../../lib/jobs/run";
+import { refreshJob, startVideoJob } from "../../../lib/jobs/run";
 import { jobStore } from "../../../lib/jobs/store";
 import type { VideoId } from "../../../lib/renderers/remotion/render";
 import {
@@ -952,7 +952,6 @@ const handler = createMcpHandler(
           }
 
           const job = await startVideoJob({ slug, variant });
-          const warning = renderHostWarning();
 
           return {
             content: [
@@ -963,10 +962,7 @@ const handler = createMcpHandler(
                   "",
                   `Poll with: get_render_job { "jobId": "${job.id}" }`,
                   "Expect roughly two minutes. Checking every 20-30 seconds is plenty.",
-                  warning ? `\n${warning}` : "",
-                ]
-                  .filter(Boolean)
-                  .join("\n"),
+                ].join("\n"),
               },
             ],
           };
@@ -996,7 +992,10 @@ const handler = createMcpHandler(
         }),
       },
       async ({ jobId }) => {
-        const job = await jobStore().get(jobId);
+        const stored = await jobStore().get(jobId);
+        // A sandbox render reports progress only when asked, so bring the
+        // record up to date before answering.
+        const job = stored ? await refreshJob(stored) : null;
         if (!job) {
           return {
             content: [{ type: "text", text: `No job with id ${jobId}.` }],

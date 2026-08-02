@@ -28,6 +28,12 @@ export type Job = {
   updatedAt: string;
   /** Milliseconds from start to finish, so cost can be reasoned about later. */
   durationMs?: number;
+  /**
+   * Set when the render is running in a Vercel Sandbox. Progress then comes
+   * from polling Remotion rather than from the renderer pushing it here, so a
+   * job nobody checks costs nothing to track.
+   */
+  sandbox?: { sandboxId: string; cmdId: string };
 };
 
 /**
