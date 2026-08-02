@@ -19,3 +19,6 @@ next-env.d.ts
 .DS_Store
 npm-debug.log*
 yarn-error.log*
+
+# Built by 'npm run build'; shipped into the function, not committed.
+.remotion-bundle/

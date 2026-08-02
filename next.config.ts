@@ -6,7 +6,13 @@ const nextConfig: NextConfig = {
   // missing from the deployed function bundle and every render fails.
   outputFileTracingIncludes: {
     "/api/render": ["./node_modules/@fontsource/*/files/*-latin-*-normal.woff"],
-    "/api/mcp": ["./node_modules/@fontsource/*/files/*-latin-*-normal.woff"],
+    "/api/mcp": [
+      "./node_modules/@fontsource/*/files/*-latin-*-normal.woff",
+      // The Remotion bundle, built by `npm run build` before Next runs. A
+      // Sandbox render copies this directory across; building it at request
+      // time needs rspack's native binary, which is not in the function.
+      "./.remotion-bundle/**/*",
+    ],
   },
 
   // Remotion's renderer picks its native compositor by platform at runtime.
