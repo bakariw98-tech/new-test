@@ -14,7 +14,7 @@ import {
   uploadToDrive,
 } from "../render/drive";
 import { closingSlide, listingCard, PRESETS, SAFE_BOTTOM, tourSlide } from "../render/listing";
-import { siteUrl } from "../../../lib/core/context";
+import { resolveRenderContext, siteUrl } from "../../../lib/core/context";
 import { refreshJob, startVideoJob } from "../../../lib/jobs/run";
 import { jobStore } from "../../../lib/jobs/store";
 import type { VideoId } from "../../../lib/renderers/remotion/render";
@@ -517,11 +517,16 @@ const handler = createMcpHandler(
       {
         title: "Create Listing Website",
         description: [
-          "Publishes a property to a hosted website and returns its live URL.",
+          "Saves a property record on this server and returns the URL that serves it.",
           "",
-          "This is the fastest way to get a listing online: hand over the property data, the",
-          "photo URLs and the agent's branding, and the page is built and served at",
-          "/p/<address-slug>. The theme supplies every colour and typeface, so the page looks",
+          "Nothing is sent anywhere. No email, no post, no message, no third party — the record",
+          "is written to this server's own storage and rendered at /p/<address-slug> when",
+          "someone visits it. Re-running with the same street address updates that same record",
+          "rather than creating another, and delete_listing removes it. Nothing here is",
+          "irreversible.",
+          "",
+          "Hand over the property data, the photo URLs and the agent's branding, and the page",
+          "is built for you. The theme supplies every colour and typeface, so the page looks",
           "designed without anyone making design decisions.",
           "",
           "Values are RAW, not pre-formatted. Send priceCents: 849500000, not \"$8,495,000\".",
@@ -532,9 +537,8 @@ const handler = createMcpHandler(
           "through this server. The first photo becomes the hero unless one is marked hero.",
           "Order is the order you pass them in.",
           "",
-          "Re-running with the same street address UPDATES that listing rather than creating a",
-          "duplicate, so correcting a typo is just another call. Pass the slug returned earlier",
-          "to be certain which listing you are editing.",
+          "Correcting a typo is just another call with the same street address. Pass the slug",
+          "returned earlier to be certain which listing you are editing.",
         ].join("\n"),
         annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
         inputSchema: z.object({
@@ -902,12 +906,141 @@ const handler = createMcpHandler(
       },
     );
 
+    /**
+     * `search` and `fetch` exist for ChatGPT specifically.
+     *
+     * A ChatGPT connector without Developer Mode is held to the deep-research
+     * contract, which recognises exactly two tool names — these two. A server
+     * offering neither has no callable surface in a default chat at all, which
+     * is how a working server ends up reported as "I can see the schema but
+     * cannot invoke it". Every other client ignores them and uses the richer
+     * tools below.
+     *
+     * Both return the payload twice: once as `structuredContent` and once
+     * JSON-encoded in `content`. OpenAI requires the duplication and treats a
+     * response carrying only one form as no match at all.
+     */
+    server.registerTool(
+      "search",
+      {
+        title: "Search Listings",
+        description: [
+          "Finds published listings by address, city, or slug, and returns their ids and URLs.",
+          "",
+          "Pass the id of any result to `fetch` to read the full property details.",
+          "An empty query returns everything currently published.",
+        ].join("\n"),
+        annotations: { readOnlyHint: true, openWorldHint: false },
+        inputSchema: z.object({
+          query: z
+            .string()
+            .max(200)
+            .default("")
+            .describe("Words from the address, city, or slug. Empty matches everything."),
+        }),
+        outputSchema: z.object({
+          results: z.array(
+            z.object({ id: z.string(), title: z.string(), url: z.string() }),
+          ),
+        }),
+      },
+      async ({ query }) => {
+        const summaries = await listingStore().list();
+
+        // Every word has to appear somewhere in the listing's text, so "sunset
+        // beverly" narrows rather than widens. Substring rather than whole-word
+        // because "sunset" should find "9541 Sunset Blvd".
+        const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
+        const results = summaries
+          .filter((s) => {
+            const haystack = `${s.slug} ${s.street} ${s.cityState}`.toLowerCase();
+            return terms.every((term) => haystack.includes(term));
+          })
+          .map((s) => ({
+            id: s.slug,
+            title: `${s.street}, ${s.cityState}`,
+            url: siteUrl(s.slug),
+          }));
+
+        const output = { results };
+        return {
+          content: [{ type: "text", text: JSON.stringify(output) }],
+          structuredContent: output,
+        };
+      },
+    );
+
+    server.registerTool(
+      "fetch",
+      {
+        title: "Fetch A Listing",
+        description: [
+          "Full details of one published listing: price, stats, description, features and agent.",
+          "",
+          "Takes an id from `search` — the listing's slug. Read-only.",
+        ].join("\n"),
+        annotations: { readOnlyHint: true, openWorldHint: false },
+        inputSchema: z.object({
+          id: z.string().min(1).max(80).describe("Listing slug, as returned by search."),
+        }),
+        outputSchema: z.object({
+          id: z.string(),
+          title: z.string(),
+          text: z.string(),
+          url: z.string(),
+        }),
+      },
+      async ({ id }) => {
+        const context = await resolveRenderContext(id);
+        if (!context) {
+          return {
+            content: [
+              { type: "text", text: `No listing with id "${id}". Use search to find one.` },
+            ],
+            isError: true,
+          };
+        }
+
+        const { listing, brand, formatted } = context;
+
+        // Built from `formatted` rather than the raw record, so this cannot
+        // disagree with the property page about a price.
+        const text = [
+          `${formatted.fullAddress}`,
+          `${formatted.price}`,
+          formatted.stats.map((s) => `${s.value} ${s.label}`).join(" · "),
+          listing.yearBuilt ? `Built ${listing.yearBuilt}` : "",
+          "",
+          listing.description,
+          listing.features.length > 0 ? `\nFeatures: ${listing.features.join(", ")}` : "",
+          "",
+          `Listed by ${brand.agentName}${brand.agentTitle ? `, ${brand.agentTitle}` : ""} — ${brand.brokerageName}`,
+          // Attribution carries the licence and disclaimer. With neither set it
+          // collapses to the brokerage name, which the line above already said.
+          formatted.attribution === brand.brokerageName ? "" : formatted.attribution,
+        ]
+          .filter((line) => line !== "")
+          .join("\n")
+          .trim();
+
+        const output = { id, title: formatted.fullAddress, text, url: context.urls.site };
+        return {
+          content: [{ type: "text", text: JSON.stringify(output) }],
+          structuredContent: output,
+        };
+      },
+    );
+
     server.registerTool(
       "render_listing_video",
       {
         title: "Render Listing Video",
         description: [
-          "Starts rendering a video for a published listing and returns a job id immediately.",
+          "Renders a video file for a listing already stored here, and returns a job id.",
+          "",
+          "Nothing is sent anywhere. The video is written to this server's own storage and the",
+          "job reports a URL to download it — it is not posted to Instagram, TikTok, or any",
+          "other account, and no message goes out. Publishing it is a separate human decision.",
           "",
           "Video is slow — around two minutes for a 19-second clip — so this does NOT wait.",
           "Poll get_render_job with the returned id until it reports done, then use the URL.",
