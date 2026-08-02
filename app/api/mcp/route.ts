@@ -1383,4 +1383,15 @@ export { handler as GET, handler as POST };
 
 export const runtime = "nodejs";
 
-export const maxDuration = 60;
+/**
+ * This is a ceiling, not a reservation — a call that finishes in 40ms is billed
+ * for 40ms. It has to be this high because starting a video render creates a
+ * Vercel Sandbox, which installs a browser and can take minutes; Remotion's own
+ * creation timeout is five.
+ *
+ * That work runs inside `after()`, which is bounded by this same number. At the
+ * previous 60 the function was killed mid-creation, the sandbox was orphaned,
+ * and the job reported `expired` about eighty seconds in — long before the
+ * eight-minute sandbox timeout it looked like it should have hit.
+ */
+export const maxDuration = 300;
