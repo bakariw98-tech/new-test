@@ -32,9 +32,30 @@ function browserExecutable(): string | null {
   return process.env.REMOTION_BROWSER_EXECUTABLE ?? process.env.CHROMIUM_PATH ?? null;
 }
 
+/**
+ * Where `npm run build` leaves the pre-built bundle.
+ *
+ * Bundling at request time does not work on a deployment: `@remotion/bundler`
+ * pulls in rspack's native binary, which is not traced into the function, and
+ * the first Sandbox render failed with "Cannot find module '@rspack/binding'".
+ * It would also be wasted work — the compositions only change when the code
+ * does, which is at build time.
+ */
+const PREBUILT_BUNDLE = ".remotion-bundle";
+
 export async function getBundle(): Promise<string> {
   if (!bundlePromise) {
     bundlePromise = (async () => {
+      const prebuilt = path.join(process.cwd(), PREBUILT_BUNDLE);
+      const { access } = await import("node:fs/promises");
+      try {
+        await access(path.join(prebuilt, "index.html"));
+        return prebuilt;
+      } catch {
+        // No prebuilt bundle — this is a dev machine, where building on demand
+        // is the whole point and the bundler is available.
+      }
+
       const { bundle } = await import("@remotion/bundler");
       return bundle({
         entryPoint: path.join(process.cwd(), "remotion", "index.ts"),
