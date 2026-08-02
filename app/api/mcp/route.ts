@@ -15,6 +15,9 @@ import {
 } from "../render/drive";
 import { closingSlide, listingCard, PRESETS, SAFE_BOTTOM, tourSlide } from "../render/listing";
 import { siteUrl } from "../../../lib/core/context";
+import { refreshJob, startVideoJob } from "../../../lib/jobs/run";
+import { jobStore } from "../../../lib/jobs/store";
+import type { VideoId } from "../../../lib/renderers/remotion/render";
 import {
   listingStore,
   listingStoreKind,
@@ -893,6 +896,137 @@ const handler = createMcpHandler(
               text: summaries
                 .map((s) => `${s.slug} — ${s.street}, ${s.cityState} — ${siteUrl(s.slug)}`)
                 .join("\n"),
+            },
+          ],
+        };
+      },
+    );
+
+    server.registerTool(
+      "render_listing_video",
+      {
+        title: "Render Listing Video",
+        description: [
+          "Starts rendering a video for a published listing and returns a job id immediately.",
+          "",
+          "Video is slow — around two minutes for a 19-second clip — so this does NOT wait.",
+          "Poll get_render_job with the returned id until it reports done, then use the URL.",
+          "",
+          "The video is built from the stored listing: same photos, same price, same branding",
+          "as the property page and the carousel. Length follows the photo count, roughly 19",
+          "seconds for five photos.",
+          "",
+          "Orientations: 9x16 is vertical for Reels, TikTok, Shorts and Stories. 16x9 is",
+          "landscape for YouTube or embedding on a website. Render both if unsure; they are",
+          "separate jobs.",
+          "",
+          "The clip is silent by design — these platforms autoplay muted, so the message is",
+          "carried on screen.",
+        ].join("\n"),
+        annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+        inputSchema: z.object({
+          slug: z.string().min(1).max(80).describe("Listing slug, as returned by create_listing."),
+          orientation: z
+            .enum(["9x16", "16x9"])
+            .default("9x16")
+            .describe("9x16 vertical for Reels and Stories; 16x9 landscape for YouTube or a site."),
+        }),
+      },
+      async ({ slug, orientation }) => {
+        try {
+          const variant = (
+            orientation === "16x9" ? "ListingVideo-16x9" : "ListingVideo-9x16"
+          ) as VideoId;
+
+          const listing = await listingStore().get(slug);
+          if (!listing) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `No listing named "${slug}". Use list_listings to see what is published.`,
+                },
+              ],
+              isError: true,
+            };
+          }
+
+          const job = await startVideoJob({ slug, variant });
+
+          return {
+            content: [
+              {
+                type: "text",
+                text: [
+                  `Job ${job.id} started — rendering ${orientation} for ${listing.listing.street}.`,
+                  "",
+                  `Poll with: get_render_job { "jobId": "${job.id}" }`,
+                  "Expect roughly two minutes. Checking every 20-30 seconds is plenty.",
+                ].join("\n"),
+              },
+            ],
+          };
+        } catch (error) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: `Could not start the render: ${error instanceof Error ? error.message : String(error)}`,
+              },
+            ],
+            isError: true,
+          };
+        }
+      },
+    );
+
+    server.registerTool(
+      "get_render_job",
+      {
+        title: "Check A Render Job",
+        description:
+          "Status of a video render started by render_listing_video. Reports queued, running with a percentage, done with the video URL, or failed with the reason.",
+        annotations: { readOnlyHint: true, openWorldHint: false },
+        inputSchema: z.object({
+          jobId: z.string().min(1).max(80).describe("As returned by render_listing_video."),
+        }),
+      },
+      async ({ jobId }) => {
+        const stored = await jobStore().get(jobId);
+        // A sandbox render reports progress only when asked, so bring the
+        // record up to date before answering.
+        const job = stored ? await refreshJob(stored) : null;
+        if (!job) {
+          return {
+            content: [{ type: "text", text: `No job with id ${jobId}.` }],
+            isError: true,
+          };
+        }
+
+        if (job.status === "done") {
+          const seconds = job.durationMs ? ` Rendered in ${Math.round(job.durationMs / 1000)}s.` : "";
+          return {
+            content: [
+              {
+                type: "text",
+                text: `${job.outputUrl}\n\nDone — ${job.variant} for ${job.slug}.${seconds}`,
+              },
+            ],
+          };
+        }
+
+        if (job.status === "failed") {
+          return {
+            content: [{ type: "text", text: `Render failed: ${job.error ?? "no reason recorded"}` }],
+            isError: true,
+          };
+        }
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: `${job.status} — ${job.progress}% (${job.variant} for ${job.slug}). Check again in 20-30 seconds.`,
             },
           ],
         };

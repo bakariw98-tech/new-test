@@ -71,13 +71,39 @@ export function blobConfigured(): boolean {
  * rather than piling up duplicates.
  */
 export async function uploadToBlob(png: Uint8Array): Promise<string> {
-  const { put } = await import("@vercel/blob");
-  const body = Buffer.from(png);
-  const digest = createHash("sha256").update(body).digest("hex").slice(0, 32);
+  return uploadRender(png, { extension: "png", contentType: "image/png" });
+}
 
-  const result = await put(`renders/${digest}.png`, body, {
+/**
+ * The same content-addressed upload for any rendered artifact. Video needed a
+ * different extension and content type, and duplicating the byte-handling to
+ * get them would have duplicated the Buffer bug along with it.
+ */
+export async function uploadRender(
+  bytes: Uint8Array,
+  options: { extension: string; contentType: string },
+): Promise<string> {
+  const body = Buffer.from(bytes);
+  const digest = createHash("sha256").update(body).digest("hex").slice(0, 32);
+  const name = `${digest}.${options.extension}`;
+
+  // Without Blob, write beside the app and serve it back. Every other store
+  // here has a local fallback; the output had none, so a video that rendered
+  // for two minutes was thrown away at the last step. That also matters beyond
+  // development: video has to run on a long-lived host, and that host will not
+  // always have Blob configured.
+  if (!blobConfigured()) {
+    const { mkdir, writeFile } = await import("node:fs/promises");
+    const dir = `${process.cwd()}/.renders`;
+    await mkdir(dir, { recursive: true });
+    await writeFile(`${dir}/${name}`, body);
+    return `${publicOrigin()}/api/renders/${name}`;
+  }
+
+  const { put } = await import("@vercel/blob");
+  const result = await put(`renders/${name}`, body, {
     access: "public",
-    contentType: "image/png",
+    contentType: options.contentType,
     addRandomSuffix: false,
     allowOverwrite: true,
     cacheControlMaxAge: 31_536_000,
