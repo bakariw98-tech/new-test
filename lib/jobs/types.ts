@@ -8,7 +8,13 @@
 
 export type JobStatus = "queued" | "running" | "done" | "failed";
 
-export type JobKind = "listing-video";
+/**
+ * "benchmark-video" is temporary — it exists only to measure Sandbox render
+ * time on a long, fast-cut composition and is not a feature; remove it (and
+ * remotion/benchmark/, and render_benchmark_video in app/api/mcp/route.ts)
+ * once that number is recorded.
+ */
+export type JobKind = "listing-video" | "benchmark-video";
 
 export type Job = {
   id: string;

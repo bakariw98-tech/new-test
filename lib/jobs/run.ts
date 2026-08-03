@@ -222,6 +222,63 @@ async function startSandboxJob(job: Job): Promise<void> {
 }
 
 /**
+ * Starts the render-speed benchmark job.
+ *
+ * Temporary, alongside everything else under `kind: "benchmark-video"` — see
+ * the comment on `JobKind`. Unlike `startVideoJob`, there is no listing to
+ * resolve and no photos to preflight: the composition has fixed content, so
+ * this goes straight to `startVercelRender`.
+ */
+export async function startBenchmarkVideoJob(): Promise<Job> {
+  const store = jobStore();
+  const now = new Date().toISOString();
+
+  const job: Job = {
+    id: randomUUID(),
+    kind: "benchmark-video",
+    status: "queued",
+    slug: "carbon-neutral-2030-benchmark",
+    variant: "CarbonNeutral2030Benchmark",
+    progress: 0,
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  await store.save(job);
+
+  const work = (async () => {
+    await store.save({ ...job, status: "running", updatedAt: new Date().toISOString() });
+    const { startVercelRender } = await import("../renderers/remotion/vercel");
+    const handle = await startVercelRender({
+      id: "CarbonNeutral2030Benchmark" as VideoId,
+      props: {},
+    });
+    await store.save({
+      ...job,
+      status: "running",
+      sandbox: handle,
+      updatedAt: new Date().toISOString(),
+    });
+  })().catch(async (error) => {
+    await store.save({
+      ...job,
+      status: "failed",
+      error: error instanceof Error ? error.message : String(error),
+      updatedAt: new Date().toISOString(),
+    });
+  });
+
+  if (renderStrategy() === "sandbox") {
+    const { after } = await import("next/server");
+    after(work);
+  } else {
+    void work;
+  }
+
+  return job;
+}
+
+/**
  * Brings a sandbox-backed job up to date by asking Remotion where it is.
  *
  * Progress is pulled on read rather than pushed: a job nobody polls costs

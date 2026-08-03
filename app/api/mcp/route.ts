@@ -15,7 +15,7 @@ import {
 } from "../render/drive";
 import { closingSlide, listingCard, PRESETS, SAFE_BOTTOM, tourSlide } from "../render/listing";
 import { resolveRenderContext, siteUrl } from "../../../lib/core/context";
-import { refreshJob, startVideoJob } from "../../../lib/jobs/run";
+import { refreshJob, startBenchmarkVideoJob, startVideoJob } from "../../../lib/jobs/run";
 import { jobStore } from "../../../lib/jobs/store";
 import type { VideoId } from "../../../lib/renderers/remotion/render";
 import {
@@ -1095,6 +1095,52 @@ const handler = createMcpHandler(
                   "",
                   `Poll with: get_render_job { "jobId": "${job.id}" }`,
                   "Expect roughly two minutes. Checking every 20-30 seconds is plenty.",
+                ].join("\n"),
+              },
+            ],
+          };
+        } catch (error) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: `Could not start the render: ${error instanceof Error ? error.message : String(error)}`,
+              },
+            ],
+            isError: true,
+          };
+        }
+      },
+    );
+
+    server.registerTool(
+      "render_benchmark_video",
+      {
+        title: "Render Benchmark Video (temporary)",
+        description: [
+          "TEMPORARY — a one-off render-speed measurement, not a product feature.",
+          "",
+          "Renders a fixed 68-second test composition through the same Sandbox path",
+          "render_listing_video uses, so the wall-clock time (poll with get_render_job)",
+          "tells us Sandbox throughput on something long and fast-cut. No arguments,",
+          "no listing involved, nothing published anywhere. Remove this tool once the",
+          "number is recorded.",
+        ].join("\n"),
+        annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+        inputSchema: z.object({}),
+      },
+      async () => {
+        try {
+          const job = await startBenchmarkVideoJob();
+          return {
+            content: [
+              {
+                type: "text",
+                text: [
+                  `Job ${job.id} started.`,
+                  "",
+                  `Poll with: get_render_job { "jobId": "${job.id}" }`,
+                  "This is a 68s/2040-frame render — expect it to take a while; check every 20-30 seconds.",
                 ].join("\n"),
               },
             ],

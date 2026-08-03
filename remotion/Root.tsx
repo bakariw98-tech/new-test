@@ -7,6 +7,7 @@ import { ClosingSlide } from "./slides/ClosingSlide";
 import { ListingVideo, type ListingVideoProps } from "./video/ListingVideo";
 import { FPS, planScenes, totalFrames } from "./video/timing";
 import { CANVAS, type SlideProps } from "./types";
+import { CarbonNeutral2030, TOTAL_FRAMES as BENCHMARK_FRAMES } from "./benchmark/CarbonNeutral2030";
 
 const sampleProps: SlideProps = {
   listing: {
@@ -97,6 +98,17 @@ export const RemotionRoot: React.FC = () => (
       durationInFrames={600}
       defaultProps={sampleVideoProps}
       calculateMetadata={calculateVideoMetadata}
+    />
+
+    {/* Render-speed benchmark only — see remotion/benchmark/CarbonNeutral2030.tsx.
+        Not a product composition; not wired into any user-facing MCP tool. */}
+    <Composition
+      id="CarbonNeutral2030Benchmark"
+      component={CarbonNeutral2030}
+      fps={FPS}
+      width={1920}
+      height={1080}
+      durationInFrames={BENCHMARK_FRAMES}
     />
   </>
 );
